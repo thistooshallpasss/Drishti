@@ -23,6 +23,8 @@ const THEMES: { id: ThemeMode; name: string; iconColor: string; bgPreview: strin
   { id: 'paper', name: 'Paper Light', iconColor: '#0284c7', bgPreview: '#f8fafc' },
 ];
 
+import { getSupabaseConfigStatus } from '@/lib/supabaseClient';
+
 export const Header: React.FC = () => {
   const {
     isCloudConnected,
@@ -39,6 +41,7 @@ export const Header: React.FC = () => {
 
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isCloudInfoOpen, setIsCloudInfoOpen] = useState(false);
 
   return (
     <header className="header-container">
@@ -88,24 +91,63 @@ export const Header: React.FC = () => {
         {/* Customization Controls */}
         <div className="controls-section">
           {/* Cloud Sync Status Indicator */}
-          <div
-            className="cloud-status-badge"
-            title={
-              isCloudConnected
-                ? 'Cloud Sync: Connected (Realtime multi-device sync active)'
-                : 'Local Memory Mode (Connect Supabase to sync across devices)'
-            }
-          >
-            {isCloudConnected ? (
-              <>
-                <Cloud size={14} className="cloud-icon-connected" />
-                <span className="cloud-text-connected">Cloud Sync</span>
-              </>
-            ) : (
-              <>
-                <CloudOff size={14} className="cloud-icon-local" />
-                <span className="cloud-text-local">Local Mode</span>
-              </>
+          <div className="relative-dropdown">
+            <button
+              onClick={() => setIsCloudInfoOpen(!isCloudInfoOpen)}
+              className="cloud-status-badge"
+              title="Click to view Cloud Sync Diagnostics"
+            >
+              {isCloudConnected ? (
+                <>
+                  <Cloud size={14} className="cloud-icon-connected" />
+                  <span className="cloud-text-connected">Cloud Sync</span>
+                </>
+              ) : (
+                <>
+                  <CloudOff size={14} className="cloud-icon-local" />
+                  <span className="cloud-text-local">Local Mode</span>
+                </>
+              )}
+            </button>
+
+            {isCloudInfoOpen && (
+              <div className="dropdown-menu cloud-diagnostic-menu">
+                <div className="dropdown-header">
+                  <Cloud size={14} />
+                  <span>Sync Diagnostics</span>
+                </div>
+                <div className="diag-item">
+                  <span className="diag-label">Status:</span>
+                  <span className={`diag-val ${isCloudConnected ? 'green' : 'amber'}`}>
+                    {isCloudConnected ? 'Connected (Live Sync Active)' : 'Local Mode (No Supabase)'}
+                  </span>
+                </div>
+                <div className="diag-item">
+                  <span className="diag-label">NEXT_PUBLIC_SUPABASE_URL:</span>
+                  <code className="diag-code">
+                    {getSupabaseConfigStatus().hasUrl ? getSupabaseConfigStatus().urlDisplay : '❌ NOT_SET in Vercel'}
+                  </code>
+                </div>
+                <div className="diag-item">
+                  <span className="diag-label">NEXT_PUBLIC_SUPABASE_ANON_KEY:</span>
+                  <code className="diag-code">
+                    {getSupabaseConfigStatus().hasAnonKey ? `✓ Set (${getSupabaseConfigStatus().anonKeyLength} chars)` : '❌ NOT_SET in Vercel'}
+                  </code>
+                </div>
+
+                {!isCloudConnected && (
+                  <div className="diag-help-box">
+                    <p className="diag-help-text">
+                      To activate Cloud Sync on Vercel:
+                    </p>
+                    <ol className="diag-help-list">
+                      <li>Go to Vercel Project ➡️ Settings ➡️ Environment Variables.</li>
+                      <li>Ensure <strong>Production</strong> is checked.</li>
+                      <li>Trigger a <strong>Redeploy</strong> without build cache.</li>
+                    </ol>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
@@ -445,6 +487,12 @@ export const Header: React.FC = () => {
           font-weight: 600;
           background: var(--bg-surface-elevated);
           border: 1px solid var(--border-card);
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .cloud-status-badge:hover {
+          border-color: var(--accent-primary);
         }
 
         .cloud-icon-connected {
@@ -462,6 +510,69 @@ export const Header: React.FC = () => {
 
         .cloud-text-local {
           color: var(--text-muted);
+        }
+
+        .cloud-diagnostic-menu {
+          min-width: 320px;
+          padding: 0.85rem;
+        }
+
+        .diag-item {
+          display: flex;
+          flex-direction: column;
+          gap: 0.2rem;
+          margin-bottom: 0.65rem;
+          font-size: 0.75rem;
+        }
+
+        .diag-label {
+          color: var(--text-muted);
+          font-size: 0.7rem;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+
+        .diag-val.green {
+          color: #10b981;
+          font-weight: 600;
+        }
+
+        .diag-val.amber {
+          color: #f59e0b;
+          font-weight: 600;
+        }
+
+        .diag-code {
+          background: rgba(0, 0, 0, 0.3);
+          padding: 0.2rem 0.4rem;
+          border-radius: 4px;
+          font-family: var(--font-mono);
+          font-size: 0.72rem;
+          color: var(--text-primary);
+          word-break: break-all;
+        }
+
+        .diag-help-box {
+          margin-top: 0.75rem;
+          padding: 0.65rem;
+          background: rgba(245, 158, 11, 0.08);
+          border: 1px solid rgba(245, 158, 11, 0.25);
+          border-radius: 8px;
+          font-size: 0.72rem;
+        }
+
+        .diag-help-text {
+          font-weight: 600;
+          color: #f59e0b;
+          margin-bottom: 0.3rem;
+        }
+
+        .diag-help-list {
+          padding-left: 1.1rem;
+          color: var(--text-secondary);
+          line-height: 1.4;
+          margin: 0;
         }
 
         @keyframes pulseGlow {

@@ -14,6 +14,16 @@ export const isSupabaseConfigured = (): boolean => {
   );
 };
 
+export const getSupabaseConfigStatus = () => {
+  return {
+    hasUrl: Boolean(supabaseUrl && supabaseUrl.trim() !== ''),
+    urlDisplay: supabaseUrl ? supabaseUrl.slice(0, 30) + '...' : 'NOT_SET',
+    hasAnonKey: Boolean(supabaseAnonKey && supabaseAnonKey.trim() !== ''),
+    anonKeyLength: supabaseAnonKey ? supabaseAnonKey.length : 0,
+    isConfigured: isSupabaseConfigured(),
+  };
+};
+
 export const supabase: SupabaseClient | null = isSupabaseConfigured()
   ? createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
