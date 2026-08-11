@@ -11,6 +11,8 @@ import {
   RotateCcw,
   Zap,
   Check,
+  Cloud,
+  CloudOff,
 } from 'lucide-react';
 
 const THEMES: { id: ThemeMode; name: string; iconColor: string; bgPreview: string }[] = [
@@ -23,6 +25,7 @@ const THEMES: { id: ThemeMode; name: string; iconColor: string; bgPreview: strin
 
 export const Header: React.FC = () => {
   const {
+    isCloudConnected,
     setActiveTileId,
     searchQuery,
     setSearchQuery,
@@ -84,6 +87,28 @@ export const Header: React.FC = () => {
 
         {/* Customization Controls */}
         <div className="controls-section">
+          {/* Cloud Sync Status Indicator */}
+          <div
+            className="cloud-status-badge"
+            title={
+              isCloudConnected
+                ? 'Cloud Sync: Connected (Realtime multi-device sync active)'
+                : 'Local Memory Mode (Connect Supabase to sync across devices)'
+            }
+          >
+            {isCloudConnected ? (
+              <>
+                <Cloud size={14} className="cloud-icon-connected" />
+                <span className="cloud-text-connected">Cloud Sync</span>
+              </>
+            ) : (
+              <>
+                <CloudOff size={14} className="cloud-icon-local" />
+                <span className="cloud-text-local">Local Mode</span>
+              </>
+            )}
+          </div>
+
           {/* Theme Switcher Dropdown */}
           <div className="relative-dropdown">
             <button
@@ -408,6 +433,40 @@ export const Header: React.FC = () => {
         .reset-option:hover {
           background: rgba(239, 68, 68, 0.1);
           color: #ef4444;
+        }
+
+        .cloud-status-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.4rem;
+          padding: 0.35rem 0.65rem;
+          border-radius: 999px;
+          font-size: 0.74rem;
+          font-weight: 600;
+          background: var(--bg-surface-elevated);
+          border: 1px solid var(--border-card);
+        }
+
+        .cloud-icon-connected {
+          color: #10b981;
+          animation: pulseGlow 2s infinite;
+        }
+
+        .cloud-text-connected {
+          color: #10b981;
+        }
+
+        .cloud-icon-local {
+          color: #f59e0b;
+        }
+
+        .cloud-text-local {
+          color: var(--text-muted);
+        }
+
+        @keyframes pulseGlow {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
         }
 
         .scale-control-wrap {

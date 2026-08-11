@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import {
   MasterTileId,
   MasterTileInfo,
@@ -23,8 +23,12 @@ import {
   INITIAL_COURSE_TREE_NODES,
   INITIAL_ACTIVITY_LOGS,
 } from '@/data/initialData';
+import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 
 interface DrishtiContextType {
+  // Cloud Sync Status
+  isCloudConnected: boolean;
+
   // Navigation & Drilldown State
   masterTiles: MasterTileInfo[];
   activeTileId: MasterTileId | null;
@@ -67,7 +71,7 @@ interface DrishtiContextType {
   deleteRevisionCard: (id: string) => void;
   toggleMasteryStatus: (id: string) => void;
 
-  // Activity Logging & Analytics
+  // Activity Logging & Analytics (60-day / 2-month retention)
   activityLogs: ActivityLogItem[];
   logActivity: (title: string, url: string, category: string, type: 'link' | 'doc_tree' | 'flashcard') => void;
   recentOpenedHistory: ActivityLogItem[];
@@ -105,14 +109,15 @@ interface DrishtiContextType {
 
 const DrishtiContext = createContext<DrishtiContextType | undefined>(undefined);
 
-const STORAGE_KEY_LINKS = 'drishti_links_v4';
-const STORAGE_KEY_TREE = 'drishti_tree_v4';
-const STORAGE_KEY_REVISION = 'drishti_revision_v4';
-const STORAGE_KEY_LOGS = 'drishti_logs_v4';
-const STORAGE_KEY_SETTINGS = 'drishti_settings_v4';
-const STORAGE_KEY_SCRATCHPAD = 'drishti_scratchpad_v4';
+const STORAGE_KEY_LINKS = 'drishti_links_v5';
+const STORAGE_KEY_TREE = 'drishti_tree_v5';
+const STORAGE_KEY_REVISION = 'drishti_revision_v5';
+const STORAGE_KEY_LOGS = 'drishti_logs_v5';
+const STORAGE_KEY_SETTINGS = 'drishti_settings_v5';
+const STORAGE_KEY_SCRATCHPAD = 'drishti_scratchpad_v5';
 
 export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [isCloudConnected, setIsCloudConnected] = useState<boolean>(isSupabaseConfigured());
   const [masterTiles] = useState<MasterTileInfo[]>(MASTER_TILES);
   const [activeTileId, setActiveTileId] = useState<MasterTileId | null>(null);
   const [activeSubTrack, setActiveSubTrack] = useState<string>('Large Language Models (LLM)');
@@ -124,7 +129,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [newsItems] = useState<TechNewsItem[]>(INITIAL_TECH_NEWS);
   const [settings, setSettings] = useState<DrishtiSettings>(INITIAL_SETTINGS);
   const [scratchpadContent, setScratchpadContent] = useState<string>(
-    `# Drishti Quick Scratchpad\n\n# SDE / AI Problem solving scratch area\n# Write code snippets, prompt drafts, or daily focus priorities here.\n\ndef solve_problem(inputs):\n    # Auto-saved in browser local memory\n    return sorted(inputs, reverse=True)\n`
+    `# Drishti Quick Scratchpad\n\n# SDE / AI Problem solving scratch area\n# Auto-saved to Cloud & local memory\n\ndef solve_problem(inputs):\n    return sorted(inputs, reverse=True)\n`
   );
   const [scratchpadLanguage, setScratchpadLanguage] = useState<string>('python');
 
@@ -141,7 +146,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [isAddRevisionModalOpen, setIsAddRevisionModalOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
-  // Automatically adjust subtrack when active tile changes
+  // Auto adjust subtrack when active tile changes
   useEffect(() => {
     if (activeTileId) {
       const tile = masterTiles.find((t) => t.id === activeTileId);
@@ -151,40 +156,313 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, [activeTileId, masterTiles]);
 
-  // Hydrate on mount
-  useEffect(() => {
-    try {
-      const savedLinks = localStorage.getItem(STORAGE_KEY_LINKS);
-      if (savedLinks) setLinks(JSON.parse(savedLinks));
-
-      const savedTree = localStorage.getItem(STORAGE_KEY_TREE);
-      if (savedTree) setTreeNodes(JSON.parse(savedTree));
-
-      const savedRevision = localStorage.getItem(STORAGE_KEY_REVISION);
-      if (savedRevision) setRevisionCards(JSON.parse(savedRevision));
-
-      const savedLogs = localStorage.getItem(STORAGE_KEY_LOGS);
-      if (savedLogs) setActivityLogs(JSON.parse(savedLogs));
-
-      const savedSettings = localStorage.getItem(STORAGE_KEY_SETTINGS);
-      if (savedSettings) {
-        const parsed = JSON.parse(savedSettings);
-        setSettings(parsed);
-      }
-
-      const savedScratch = localStorage.getItem(STORAGE_KEY_SCRATCHPAD);
-      if (savedScratch) setScratchpadContent(savedScratch);
-    } catch (e) {
-      console.warn('Could not read from localStorage', e);
-    }
+  // Filter logs for rolling 60 days (current month + previous month)
+  const filter60DayLogs = useCallback((rawLogs: ActivityLogItem[]): ActivityLogItem[] => {
+    const now = new Date().getTime();
+    const sixtyDaysMs = 60 * 24 * 60 * 60 * 1000;
+    return rawLogs.filter((log) => {
+      const logTime = new Date(log.timestamp).getTime();
+      return now - logTime <= sixtyDaysMs;
+    });
   }, []);
 
-  // Save to localStorage
+  // Hydrate Data on Mount (Cloud-First with Local Storage Fallback)
+  useEffect(() => {
+    const initData = async () => {
+      // 1. Try local storage first for instant render
+      try {
+        const savedLinks = localStorage.getItem(STORAGE_KEY_LINKS);
+        if (savedLinks) setLinks(JSON.parse(savedLinks));
+
+        const savedTree = localStorage.getItem(STORAGE_KEY_TREE);
+        if (savedTree) setTreeNodes(JSON.parse(savedTree));
+
+        const savedRevision = localStorage.getItem(STORAGE_KEY_REVISION);
+        if (savedRevision) setRevisionCards(JSON.parse(savedRevision));
+
+        const savedLogs = localStorage.getItem(STORAGE_KEY_LOGS);
+        if (savedLogs) setActivityLogs(filter60DayLogs(JSON.parse(savedLogs)));
+
+        const savedSettings = localStorage.getItem(STORAGE_KEY_SETTINGS);
+        if (savedSettings) setSettings(JSON.parse(savedSettings));
+
+        const savedScratch = localStorage.getItem(STORAGE_KEY_SCRATCHPAD);
+        if (savedScratch) setScratchpadContent(savedScratch);
+      } catch (e) {
+        console.warn('Local storage read error', e);
+      }
+
+      // 2. Fetch from Supabase if configured
+      if (supabase && isSupabaseConfigured()) {
+        try {
+          setIsCloudConnected(true);
+
+          // Fetch Links
+          const { data: dbLinks } = await supabase.from('drishti_links').select('*');
+          if (dbLinks && dbLinks.length > 0) {
+            const mappedLinks: DeepLinkItem[] = dbLinks.map((row) => ({
+              id: row.id,
+              title: row.title,
+              url: row.url,
+              category: row.category as LinkCategory,
+              description: row.description,
+              isPinned: row.is_pinned,
+              orderIndex: row.order_index,
+              iconType: row.icon_type,
+              iconValue: row.icon_value,
+              tags: row.tags || [],
+              badge: row.badge,
+              accentColor: row.accent_color,
+              clickCount: row.click_count,
+              lastVisited: row.last_visited,
+              createdAt: row.created_at,
+            }));
+            setLinks(mappedLinks);
+          } else {
+            // Seed initial links to cloud on first project setup
+            const seedPayload = INITIAL_LINKS.map((l) => ({
+              id: l.id,
+              title: l.title,
+              url: l.url,
+              category: l.category,
+              description: l.description || '',
+              is_pinned: l.isPinned,
+              order_index: l.orderIndex,
+              tags: l.tags,
+              badge: l.badge || '',
+              click_count: l.clickCount,
+              last_visited: l.lastVisited || '',
+            }));
+            await supabase.from('drishti_links').upsert(seedPayload);
+          }
+
+          // Fetch Tree Nodes
+          const { data: dbTree } = await supabase.from('drishti_tree_nodes').select('*');
+          if (dbTree && dbTree.length > 0) {
+            const mappedTree: CourseTreeNode[] = dbTree.map((row) => ({
+              id: row.id,
+              masterTileId: row.master_tile_id as MasterTileId,
+              subTrack: row.sub_track,
+              code: row.code,
+              title: row.title,
+              url: row.url,
+              notesSnippet: row.notes_snippet,
+              createdAt: row.created_at,
+            }));
+            setTreeNodes(mappedTree);
+          } else {
+            const seedTree = INITIAL_COURSE_TREE_NODES.map((t) => ({
+              id: t.id,
+              master_tile_id: t.masterTileId,
+              sub_track: t.subTrack,
+              code: t.code,
+              title: t.title,
+              url: t.url,
+            }));
+            await supabase.from('drishti_tree_nodes').upsert(seedTree);
+          }
+
+          // Fetch Revision Cards
+          const { data: dbCards } = await supabase.from('drishti_revision_cards').select('*');
+          if (dbCards && dbCards.length > 0) {
+            const mappedCards: RevisionFlashcardItem[] = dbCards.map((row) => ({
+              id: row.id,
+              masterTileId: row.master_tile_id as MasterTileId,
+              category: row.category as RevisionCategory,
+              question: row.question,
+              difficulty: row.difficulty,
+              hint: row.hint,
+              tags: row.tags || [],
+              answerSummary: row.answer_summary,
+              answerMarkdown: row.answer_markdown,
+              keyTakeaways: row.key_takeaways || [],
+              masteryStatus: row.mastery_status,
+              reviewCount: row.review_count,
+              createdAt: row.created_at,
+            }));
+            setRevisionCards(mappedCards);
+          } else {
+            const seedCards = INITIAL_REVISION_CARDS.map((c) => ({
+              id: c.id,
+              master_tile_id: c.masterTileId,
+              category: c.category,
+              question: c.question,
+              difficulty: c.difficulty,
+              hint: c.hint,
+              tags: c.tags,
+              answer_summary: c.answerSummary,
+              answer_markdown: c.answerMarkdown,
+              key_takeaways: c.keyTakeaways,
+              mastery_status: c.masteryStatus,
+              review_count: c.reviewCount,
+            }));
+            await supabase.from('drishti_revision_cards').upsert(seedCards);
+          }
+
+          // Fetch Activity Logs (last 60 days)
+          const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+          const { data: dbLogs } = await supabase
+            .from('drishti_activity_logs')
+            .select('*')
+            .gte('timestamp', sixtyDaysAgo)
+            .order('timestamp', { ascending: false });
+
+          if (dbLogs && dbLogs.length > 0) {
+            const mappedLogs: ActivityLogItem[] = dbLogs.map((row) => ({
+              id: row.id,
+              title: row.title,
+              url: row.url,
+              category: row.category,
+              type: row.type,
+              timestamp: row.timestamp,
+              dateStr: row.date_str,
+              timeStr: row.time_str,
+            }));
+            setActivityLogs(mappedLogs);
+          }
+
+          // Fetch Settings & Scratchpad
+          const { data: dbSettings } = await supabase
+            .from('drishti_settings')
+            .select('*')
+            .eq('id', 'master_config')
+            .single();
+
+          if (dbSettings) {
+            if (dbSettings.scratchpad_content) {
+              setScratchpadContent(dbSettings.scratchpad_content);
+            }
+            if (dbSettings.theme) {
+              setSettings((prev) => ({
+                ...prev,
+                theme: dbSettings.theme as ThemeMode,
+                uiScale: dbSettings.ui_scale || 100,
+              }));
+            }
+          }
+        } catch (err) {
+          console.warn('Supabase cloud fetch error', err);
+        }
+      }
+    };
+
+    initData();
+  }, [filter60DayLogs]);
+
+  // Real-Time Subscription across all devices
+  useEffect(() => {
+    if (!supabase || !isSupabaseConfigured()) return;
+
+    const channel = supabase
+      .channel('drishti-global-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'drishti_links' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const row = payload.new;
+          setLinks((prev) => {
+            if (prev.some((l) => l.id === row.id)) return prev;
+            const item: DeepLinkItem = {
+              id: row.id,
+              title: row.title,
+              url: row.url,
+              category: row.category as LinkCategory,
+              description: row.description,
+              isPinned: row.is_pinned,
+              orderIndex: row.order_index,
+              iconType: row.icon_type,
+              iconValue: row.icon_value,
+              tags: row.tags || [],
+              badge: row.badge,
+              accentColor: row.accent_color,
+              clickCount: row.click_count,
+              lastVisited: row.last_visited,
+              createdAt: row.created_at,
+            };
+            return [item, ...prev];
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          const row = payload.new;
+          setLinks((prev) =>
+            prev.map((l) =>
+              l.id === row.id
+                ? {
+                    ...l,
+                    title: row.title,
+                    url: row.url,
+                    category: row.category as LinkCategory,
+                    description: row.description,
+                    isPinned: row.is_pinned,
+                    tags: row.tags || [],
+                    clickCount: row.click_count,
+                    lastVisited: row.last_visited,
+                  }
+                : l
+            )
+          );
+        } else if (payload.eventType === 'DELETE') {
+          setLinks((prev) => prev.filter((l) => l.id !== payload.old.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'drishti_tree_nodes' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const row = payload.new;
+          setTreeNodes((prev) => {
+            if (prev.some((t) => t.id === row.id)) return prev;
+            const node: CourseTreeNode = {
+              id: row.id,
+              masterTileId: row.master_tile_id as MasterTileId,
+              subTrack: row.sub_track,
+              code: row.code,
+              title: row.title,
+              url: row.url,
+              createdAt: row.created_at,
+            };
+            return [...prev, node];
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          const row = payload.new;
+          setTreeNodes((prev) =>
+            prev.map((t) =>
+              t.id === row.id
+                ? {
+                    ...t,
+                    code: row.code,
+                    title: row.title,
+                    url: row.url,
+                    subTrack: row.sub_track,
+                  }
+                : t
+            )
+          );
+        } else if (payload.eventType === 'DELETE') {
+          setTreeNodes((prev) => prev.filter((t) => t.id !== payload.old.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'drishti_settings' }, (payload) => {
+        if (payload.eventType === 'UPDATE') {
+          const row = payload.new;
+          if (row.scratchpad_content !== undefined) {
+            setScratchpadContent(row.scratchpad_content);
+          }
+          if (row.theme) {
+            setSettings((prev) => ({ ...prev, theme: row.theme as ThemeMode, uiScale: row.ui_scale || 100 }));
+          }
+        }
+      })
+      .subscribe();
+
+    return () => {
+      if (supabase) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, []);
+
+  // Save to Local Storage as fast local cache
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY_LINKS, JSON.stringify(links));
     } catch (e) {
-      console.warn('Failed to save links', e);
+      console.warn('Failed to save links to local cache', e);
     }
   }, [links]);
 
@@ -242,7 +520,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Activity Logging
+  // Activity Logging (60-day / 2-month rolling retention)
   const logActivity = (
     title: string,
     url: string,
@@ -260,10 +538,28 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
       dateStr: now.toISOString().split('T')[0],
       timeStr: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
     };
-    setActivityLogs((prev) => [newLog, ...prev.slice(0, 499)]);
+
+    setActivityLogs((prev) => filter60DayLogs([newLog, ...prev]));
+
+    // Push to Supabase if connected
+    if (supabase && isSupabaseConfigured()) {
+      supabase
+        .from('drishti_activity_logs')
+        .insert({
+          id: newLog.id,
+          title: newLog.title,
+          url: newLog.url,
+          category: newLog.category,
+          type: newLog.type,
+          timestamp: newLog.timestamp,
+          date_str: newLog.dateStr,
+          time_str: newLog.timeStr,
+        })
+        .then();
+    }
   };
 
-  // Recent 10 Opened History
+  // Recent 10 Opened Destinations
   const recentOpenedHistory = React.useMemo(() => {
     const seen = new Set<string>();
     const recents: ActivityLogItem[] = [];
@@ -278,7 +574,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return recents;
   }, [activityLogs]);
 
-  // Link Management
+  // Link Management with Real-Time Cloud Sync
   const addLink = (title: string, url: string, category: LinkCategory = 'ai') => {
     let cleanUrl = url.trim();
     if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
@@ -298,47 +594,74 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
       clickCount: 0,
       createdAt: new Date().toISOString().split('T')[0],
     };
+
     setLinks((prev) => [item, ...prev]);
     logActivity(item.title, item.url, item.category, 'link');
+
+    if (supabase && isSupabaseConfigured()) {
+      supabase
+        .from('drishti_links')
+        .insert({
+          id: item.id,
+          title: item.title,
+          url: item.url,
+          category: item.category,
+          description: item.description || '',
+          is_pinned: item.isPinned,
+          order_index: item.orderIndex,
+          tags: item.tags,
+          badge: item.badge || '',
+          click_count: item.clickCount,
+          last_visited: item.lastVisited || '',
+        })
+        .then();
+    }
   };
 
   const updateLink = (id: string, updates: Partial<DeepLinkItem>) => {
     setLinks((prev) =>
       prev.map((item) => (item.id === id ? { ...item, ...updates } : item))
     );
+
+    if (supabase && isSupabaseConfigured()) {
+      const dbUpdates: Record<string, any> = {};
+      if (updates.title !== undefined) dbUpdates.title = updates.title;
+      if (updates.url !== undefined) dbUpdates.url = updates.url;
+      if (updates.category !== undefined) dbUpdates.category = updates.category;
+      if (updates.description !== undefined) dbUpdates.description = updates.description;
+      if (updates.isPinned !== undefined) dbUpdates.is_pinned = updates.isPinned;
+      if (updates.tags !== undefined) dbUpdates.tags = updates.tags;
+      if (updates.clickCount !== undefined) dbUpdates.click_count = updates.clickCount;
+      if (updates.lastVisited !== undefined) dbUpdates.last_visited = updates.lastVisited;
+
+      supabase.from('drishti_links').update(dbUpdates).eq('id', id).then();
+    }
   };
 
   const deleteLink = (id: string) => {
     setLinks((prev) => prev.filter((item) => item.id !== id));
+    if (supabase && isSupabaseConfigured()) {
+      supabase.from('drishti_links').delete().eq('id', id).then();
+    }
   };
 
   const togglePinLink = (id: string) => {
-    setLinks((prev) =>
-      prev.map((item) =>
-        item.id === id ? { ...item, isPinned: !item.isPinned } : item
-      )
-    );
+    const target = links.find((l) => l.id === id);
+    if (!target) return;
+    const newPinned = !target.isPinned;
+    updateLink(id, { isPinned: newPinned });
   };
 
   const recordLinkClick = (id: string) => {
     const targetLink = links.find((l) => l.id === id);
     if (targetLink) {
       logActivity(targetLink.title, targetLink.url, targetLink.category, 'link');
+      const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      updateLink(id, { clickCount: targetLink.clickCount + 1, lastVisited: nowStr });
     }
-    setLinks((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              clickCount: item.clickCount + 1,
-              lastVisited: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            }
-          : item
-      )
-    );
   };
 
-  // Tree Node Operations with Cascading Delete
+  // Tree Node Operations with Cascading Delete & Cloud Sync
   const addTreeNode = (
     code: string,
     title: string,
@@ -363,12 +686,35 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     setTreeNodes((prev) => [...prev, newNode]);
     logActivity(`${newNode.code} ${newNode.title}`, newNode.url, `${masterTileId} / ${subTrack}`, 'doc_tree');
+
+    if (supabase && isSupabaseConfigured()) {
+      supabase
+        .from('drishti_tree_nodes')
+        .insert({
+          id: newNode.id,
+          master_tile_id: newNode.masterTileId,
+          sub_track: newNode.subTrack,
+          code: newNode.code,
+          title: newNode.title,
+          url: newNode.url,
+        })
+        .then();
+    }
   };
 
   const updateTreeNode = (id: string, updates: Partial<CourseTreeNode>) => {
     setTreeNodes((prev) =>
       prev.map((node) => (node.id === id ? { ...node, ...updates } : node))
     );
+
+    if (supabase && isSupabaseConfigured()) {
+      const dbUpdates: Record<string, any> = {};
+      if (updates.code !== undefined) dbUpdates.code = updates.code;
+      if (updates.title !== undefined) dbUpdates.title = updates.title;
+      if (updates.url !== undefined) dbUpdates.url = updates.url;
+      if (updates.subTrack !== undefined) dbUpdates.sub_track = updates.subTrack;
+      supabase.from('drishti_tree_nodes').update(dbUpdates).eq('id', id).then();
+    }
   };
 
   const deleteTreeNodeCascade = (id: string) => {
@@ -376,9 +722,14 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (!target) return;
 
     const targetCodeClean = target.code.trim().replace(/\.$/, '');
+    const idsToDelete: string[] = [];
+
     setTreeNodes((prev) =>
       prev.filter((node) => {
-        if (node.id === id) return false;
+        if (node.id === id) {
+          idsToDelete.push(node.id);
+          return false;
+        }
         if (
           node.masterTileId === target.masterTileId &&
           node.subTrack === target.subTrack
@@ -388,12 +739,17 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
             nodeCodeClean === targetCodeClean ||
             nodeCodeClean.startsWith(`${targetCodeClean}.`)
           ) {
+            idsToDelete.push(node.id);
             return false;
           }
         }
         return true;
       })
     );
+
+    if (supabase && isSupabaseConfigured() && idsToDelete.length > 0) {
+      supabase.from('drishti_tree_nodes').delete().in('id', idsToDelete).then();
+    }
   };
 
   // Filtered links
@@ -461,18 +817,49 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
       reviewCount: 0,
       createdAt: new Date().toISOString().split('T')[0],
     };
+
     setRevisionCards((prev) => [card, ...prev]);
     logActivity(card.question, linkOrSummary, category, 'flashcard');
+
+    if (supabase && isSupabaseConfigured()) {
+      supabase
+        .from('drishti_revision_cards')
+        .insert({
+          id: card.id,
+          master_tile_id: card.masterTileId,
+          category: card.category,
+          question: card.question,
+          difficulty: card.difficulty,
+          tags: card.tags,
+          answer_summary: card.answerSummary,
+          answer_markdown: card.answerMarkdown,
+          key_takeaways: card.keyTakeaways,
+          mastery_status: card.masteryStatus,
+          review_count: card.reviewCount,
+        })
+        .then();
+    }
   };
 
   const updateRevisionCard = (id: string, updates: Partial<RevisionFlashcardItem>) => {
     setRevisionCards((prev) =>
       prev.map((c) => (c.id === id ? { ...c, ...updates } : c))
     );
+
+    if (supabase && isSupabaseConfigured()) {
+      const dbUpdates: Record<string, any> = {};
+      if (updates.question !== undefined) dbUpdates.question = updates.question;
+      if (updates.answerSummary !== undefined) dbUpdates.answer_summary = updates.answerSummary;
+      if (updates.masteryStatus !== undefined) dbUpdates.mastery_status = updates.masteryStatus;
+      supabase.from('drishti_revision_cards').update(dbUpdates).eq('id', id).then();
+    }
   };
 
   const deleteRevisionCard = (id: string) => {
     setRevisionCards((prev) => prev.filter((c) => c.id !== id));
+    if (supabase && isSupabaseConfigured()) {
+      supabase.from('drishti_revision_cards').delete().eq('id', id).then();
+    }
   };
 
   const toggleMasteryStatus = (id: string) => {
@@ -484,24 +871,42 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
             reviewing: 'mastered',
             mastered: 'learning',
           };
-          return { ...c, masteryStatus: nextStatus[c.masteryStatus] || 'learning' };
+          const newStatus = nextStatus[c.masteryStatus] || 'learning';
+          if (supabase && isSupabaseConfigured()) {
+            supabase.from('drishti_revision_cards').update({ mastery_status: newStatus }).eq('id', id).then();
+          }
+          return { ...c, masteryStatus: newStatus };
         }
         return c;
       })
     );
   };
 
-  // Customization
+  // Customization & Themes
   const setTheme = (theme: ThemeMode) => {
     setSettings((prev) => ({ ...prev, theme }));
+    if (supabase && isSupabaseConfigured()) {
+      supabase.from('drishti_settings').upsert({ id: 'master_config', theme }).then();
+    }
   };
 
   const setUiScale = (uiScale: number) => {
     setSettings((prev) => ({ ...prev, uiScale }));
+    if (supabase && isSupabaseConfigured()) {
+      supabase.from('drishti_settings').upsert({ id: 'master_config', ui_scale: uiScale }).then();
+    }
   };
 
   const updateSettings = (updates: Partial<DrishtiSettings>) => {
     setSettings((prev) => ({ ...prev, ...updates }));
+  };
+
+  // Update scratchpad to cloud
+  const handleUpdateScratchpad = (content: string) => {
+    setScratchpadContent(content);
+    if (supabase && isSupabaseConfigured()) {
+      supabase.from('drishti_settings').upsert({ id: 'master_config', scratchpad_content: content }).then();
+    }
   };
 
   // Export Activity Logs
@@ -539,7 +944,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const exportDataJson = () => {
     const backupData = {
-      version: '4.0',
+      version: '5.0',
       exportedAt: new Date().toISOString(),
       links,
       treeNodes,
@@ -568,6 +973,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
   return (
     <DrishtiContext.Provider
       value={{
+        isCloudConnected,
         masterTiles,
         activeTileId,
         setActiveTileId,
@@ -612,7 +1018,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
         newsItems,
         scratchpadContent,
-        setScratchpadContent,
+        setScratchpadContent: handleUpdateScratchpad,
         scratchpadLanguage,
         setScratchpadLanguage,
 
