@@ -1,6 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// Supabase credentials with fallback to project defaults
 const supabaseUrl =
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://javerefwezfbroyfajuu.supabase.co';
 
@@ -19,6 +18,9 @@ export const isSupabaseConfigured = (): boolean => {
 
 export const supabase: SupabaseClient | null = isSupabaseConfigured()
   ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: false,
+      },
       realtime: {
         params: {
           eventsPerSecond: 10,
