@@ -1,6 +1,6 @@
 ================================================================================
 DRISHTI (दृष्टि) - COMPLETE CODEBASE SNAPSHOT
-Generated on: 2026-08-12 00:39:16
+Generated on: 2026-08-12 01:01:31
 Total files captured: 33
 ================================================================================
 
@@ -174,6 +174,13 @@ FILE: next.config.mjs
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  env: {
+    NEXT_PUBLIC_SUPABASE_URL:
+      process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://javerefwezfbroyfajuu.supabase.co',
+    NEXT_PUBLIC_SUPABASE_ANON_KEY:
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImphdmVyZWZ3ZXpmYnJveWZhanV1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY0NjM3MTcsImV4cCI6MjEwMjAzOTcxN30.r43m-BHX6DX2o4KS16nOWZW0qAkwO3Ds8-DkIWxSMeM',
+  },
   images: {
     remotePatterns: [
       {
@@ -8680,8 +8687,11 @@ FILE: src/lib/supabaseClient.ts
 ================================================================================
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabaseUrl =
+  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://javerefwezfbroyfajuu.supabase.co';
+const supabaseAnonKey =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImphdmVyZWZ3ZXpmYnJveWZhanV1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY0NjM3MTcsImV4cCI6MjEwMjAzOTcxN30.r43m-BHX6DX2o4KS16nOWZW0qAkwO3Ds8-DkIWxSMeM';
 
 export const isSupabaseConfigured = (): boolean => {
   return Boolean(
@@ -8689,7 +8699,6 @@ export const isSupabaseConfigured = (): boolean => {
       supabaseAnonKey &&
       supabaseUrl.trim() !== '' &&
       supabaseAnonKey.trim() !== '' &&
-      supabaseUrl !== 'https://your-project.supabase.co' &&
       !supabaseUrl.includes('placeholder')
   );
 };
