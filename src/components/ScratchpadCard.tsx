@@ -1,28 +1,54 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useDrishti } from '@/context/DrishtiContext';
-import { Terminal, Copy, Check, Trash2, Save, FileCode } from 'lucide-react';
+import { Terminal, Copy, Check, Trash2, Save, CloudOff, Cloud } from 'lucide-react';
 
 export const ScratchpadCard: React.FC = () => {
   const {
     scratchpadContent,
     setScratchpadContent,
+    flushScratchpadToCloud,
     scratchpadLanguage,
     setScratchpadLanguage,
+    isCloudConnected,
   } = useDrishti();
 
   const [copied, setCopied] = useState(false);
+  // Local text drives the UI instantly — no waiting for cloud round-trip
+  const [localText, setLocalText] = useState(scratchpadContent);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // Sync local text if cloud content changes (e.g. another device edited it)
+  useEffect(() => {
+    setLocalText(scratchpadContent);
+  }, [scratchpadContent]);
+
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setLocalText(val);
+    setScratchpadContent(val); // update local state immediately (for localStorage)
+
+    // Debounce cloud write: only flush after 800ms of idle
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setIsSyncing(true);
+    debounceRef.current = setTimeout(() => {
+      flushScratchpadToCloud(val);
+      setIsSyncing(false);
+    }, 800);
+  }, [setScratchpadContent, flushScratchpadToCloud]);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(scratchpadContent);
+    navigator.clipboard.writeText(localText);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
   const handleClear = () => {
     if (confirm('Clear scratchpad content?')) {
-      setScratchpadContent('');
+      setLocalText('');
+      flushScratchpadToCloud('');
     }
   };
 
@@ -66,8 +92,8 @@ export const ScratchpadCard: React.FC = () => {
       {/* Editor Area */}
       <div className="editor-wrap">
         <textarea
-          value={scratchpadContent}
-          onChange={(e) => setScratchpadContent(e.target.value)}
+          value={localText}
+          onChange={handleChange}
           placeholder="// Paste temporary algorithms, notes, or logic here..."
           className="code-textarea"
           spellCheck={false}
@@ -77,11 +103,16 @@ export const ScratchpadCard: React.FC = () => {
       {/* Footer */}
       <div className="scratchpad-footer">
         <div className="status-saved">
-          <Save size={12} className="save-icon" />
-          <span>Auto-saved to local memory</span>
+          {isSyncing ? (
+            <><Cloud size={12} className="save-icon" /><span>Syncing…</span></>
+          ) : isCloudConnected ? (
+            <><Cloud size={12} className="save-icon" /><span>Saved to cloud</span></>
+          ) : (
+            <><CloudOff size={12} className="save-icon" style={{ color: 'var(--text-muted)' }} /><span style={{ color: 'var(--text-muted)' }}>Local only</span></>
+          )}
         </div>
         <span className="char-count">
-          {scratchpadContent.length} chars • {scratchpadContent.split('\n').length} lines
+          {localText.length} chars • {localText.split('\n').length} lines
         </span>
       </div>
 

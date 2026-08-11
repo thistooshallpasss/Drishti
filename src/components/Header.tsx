@@ -28,6 +28,8 @@ import { getSupabaseConfigStatus } from '@/lib/supabaseClient';
 export const Header: React.FC = () => {
   const {
     isCloudConnected,
+    syncError,
+    setSyncError,
     setActiveTileId,
     searchQuery,
     setSearchQuery,
@@ -44,6 +46,7 @@ export const Header: React.FC = () => {
   const [isCloudInfoOpen, setIsCloudInfoOpen] = useState(false);
 
   return (
+    <>
     <header className="header-container">
       <div className="header-content">
         {/* Brand & Identity (Clicking logo returns to Master Dashboard) */}
@@ -119,7 +122,7 @@ export const Header: React.FC = () => {
                 <div className="diag-item">
                   <span className="diag-label">Status:</span>
                   <span className={`diag-val ${isCloudConnected ? 'green' : 'amber'}`}>
-                    {isCloudConnected ? 'Connected (Live Sync Active)' : 'Local Mode (No Supabase)'}
+                    {isCloudConnected ? '🟢 Live Sync Active (SUBSCRIBED)' : '🔴 Local Mode — no Supabase realtime'}
                   </span>
                 </div>
                 <div className="diag-item">
@@ -618,7 +621,52 @@ export const Header: React.FC = () => {
             gap: 0.75rem;
           }
         }
+
+        @media (max-width: 600px) {
+          .brand-subtitle { display: none; }
+          .brand-sanskrit { display: none; }
+          .search-section { display: none; }
+          .header-content { padding: 0.65rem 0.9rem; gap: 0.5rem; }
+          .cloud-status-badge .cloud-text-connected,
+          .cloud-status-badge .cloud-text-local { display: none; }
+        }
       `}</style>
     </header>
+    {syncError && (
+      <div className="sync-error-banner">
+        <span>⚠️ {syncError}</span>
+        <button onClick={() => setSyncError(null)} className="sync-error-dismiss" title="Dismiss">✕</button>
+        <style jsx>{`
+          .sync-error-banner {
+            position: fixed;
+            bottom: 1rem;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(245, 158, 11, 0.15);
+            border: 1px solid rgba(245, 158, 11, 0.4);
+            color: #fbbf24;
+            padding: 0.55rem 1rem;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 0.82rem;
+            backdrop-filter: blur(12px);
+            z-index: 9999;
+            max-width: calc(100vw - 2rem);
+          }
+          .sync-error-dismiss {
+            background: none;
+            border: none;
+            color: #fbbf24;
+            cursor: pointer;
+            font-size: 1rem;
+            line-height: 1;
+            padding: 0 0.25rem;
+          }
+        `}</style>
+      </div>
+    )}
+    </>
   );
 };
