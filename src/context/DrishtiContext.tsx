@@ -35,6 +35,10 @@ interface DrishtiContextType {
   setActiveTileId: (id: MasterTileId | null) => void;
   activeSubTrack: string;
   setActiveSubTrack: (track: string) => void;
+  customSubTracks: Record<string, string[]>;
+  getSubTracksForTile: (tileId: MasterTileId) => string[];
+  addCustomSubTrack: (tileId: MasterTileId, name: string) => void;
+  deleteCustomSubTrack: (tileId: MasterTileId, name: string) => void;
 
   // Search
   searchQuery: string;
@@ -115,12 +119,14 @@ const STORAGE_KEY_REVISION = 'drishti_revision_v5';
 const STORAGE_KEY_LOGS = 'drishti_logs_v5';
 const STORAGE_KEY_SETTINGS = 'drishti_settings_v5';
 const STORAGE_KEY_SCRATCHPAD = 'drishti_scratchpad_v5';
+const STORAGE_KEY_CUSTOM_SUBTRACKS = 'drishti_custom_subtracks_v5';
 
 export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isCloudConnected, setIsCloudConnected] = useState<boolean>(isSupabaseConfigured());
   const [masterTiles] = useState<MasterTileInfo[]>(MASTER_TILES);
   const [activeTileId, setActiveTileId] = useState<MasterTileId | null>(null);
   const [activeSubTrack, setActiveSubTrack] = useState<string>('Large Language Models (LLM)');
+  const [customSubTracks, setCustomSubTracks] = useState<Record<string, string[]>>({});
 
   const [links, setLinks] = useState<DeepLinkItem[]>(INITIAL_LINKS);
   const [treeNodes, setTreeNodes] = useState<CourseTreeNode[]>(INITIAL_COURSE_TREE_NODES);
@@ -146,15 +152,104 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [isAddRevisionModalOpen, setIsAddRevisionModalOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
+  // Dynamic Sub-Tracks derivation (base tracks + custom tracks + tracks from tree nodes)
+  const getSubTracksForTile = useCallback(
+    (tileId: MasterTileId): string[] => {
+      const baseTile = MASTER_TILES.find((t) => t.id === tileId);
+      const baseTracks = baseTile ? baseTile.subTracks : [];
+      const custom = customSubTracks[tileId] || [];
+      const fromTree = treeNodes
+        .filter((n) => n.masterTileId === tileId && n.subTrack && n.subTrack.trim() !== '')
+        .map((n) => n.subTrack.trim());
+
+      const uniqueSet = new Set<string>();
+      baseTracks.forEach((t) => uniqueSet.add(t));
+      custom.forEach((t) => uniqueSet.add(t));
+      fromTree.forEach((t) => uniqueSet.add(t));
+
+      return Array.from(uniqueSet);
+    },
+    [customSubTracks, treeNodes]
+  );
+
+  const addCustomSubTrack = useCallback(
+    (tileId: MasterTileId, name: string) => {
+      const cleanName = name.trim();
+      if (!cleanName) return;
+
+      setCustomSubTracks((prev) => {
+        const existing = prev[tileId] || [];
+        if (existing.includes(cleanName)) return prev;
+        const updated = { ...prev, [tileId]: [...existing, cleanName] };
+        try {
+          localStorage.setItem(STORAGE_KEY_CUSTOM_SUBTRACKS, JSON.stringify(updated));
+        } catch (e) {
+          console.warn('Failed to save custom subtracks', e);
+        }
+        if (supabase && isSupabaseConfigured()) {
+          supabase
+            .from('drishti_settings')
+            .upsert({ id: 'master_config', custom_subtracks: updated })
+            .then();
+        }
+        return updated;
+      });
+
+      setActiveSubTrack(cleanName);
+    },
+    []
+  );
+
+  const deleteCustomSubTrack = useCallback(
+    (tileId: MasterTileId, name: string) => {
+      setCustomSubTracks((prev) => {
+        const existing = prev[tileId] || [];
+        const updated = { ...prev, [tileId]: existing.filter((t) => t !== name) };
+        try {
+          localStorage.setItem(STORAGE_KEY_CUSTOM_SUBTRACKS, JSON.stringify(updated));
+        } catch (e) {}
+        if (supabase && isSupabaseConfigured()) {
+          supabase
+            .from('drishti_settings')
+            .upsert({ id: 'master_config', custom_subtracks: updated })
+            .then();
+        }
+        return updated;
+      });
+
+      // Cascade delete tree nodes in this subtrack
+      setTreeNodes((prev) =>
+        prev.filter((n) => !(n.masterTileId === tileId && n.subTrack === name))
+      );
+
+      if (supabase && isSupabaseConfigured()) {
+        supabase
+          .from('drishti_tree_nodes')
+          .delete()
+          .eq('master_tile_id', tileId)
+          .eq('sub_track', name)
+          .then();
+      }
+
+      const remaining = getSubTracksForTile(tileId).filter((t) => t !== name);
+      if (remaining.length > 0) {
+        setActiveSubTrack(remaining[0]);
+      }
+    },
+    [getSubTracksForTile]
+  );
+
   // Auto adjust subtrack when active tile changes
   useEffect(() => {
     if (activeTileId) {
-      const tile = masterTiles.find((t) => t.id === activeTileId);
-      if (tile && tile.subTracks.length > 0) {
-        setActiveSubTrack(tile.subTracks[0]);
+      const tracks = getSubTracksForTile(activeTileId);
+      if (tracks.length > 0) {
+        if (!tracks.includes(activeSubTrack)) {
+          setActiveSubTrack(tracks[0]);
+        }
       }
     }
-  }, [activeTileId, masterTiles]);
+  }, [activeTileId, getSubTracksForTile, activeSubTrack]);
 
   // Filter logs for rolling 60 days (current month + previous month)
   const filter60DayLogs = useCallback((rawLogs: ActivityLogItem[]): ActivityLogItem[] => {
@@ -188,6 +283,9 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
         const savedScratch = localStorage.getItem(STORAGE_KEY_SCRATCHPAD);
         if (savedScratch) setScratchpadContent(savedScratch);
+
+        const savedSubTracks = localStorage.getItem(STORAGE_KEY_CUSTOM_SUBTRACKS);
+        if (savedSubTracks) setCustomSubTracks(JSON.parse(savedSubTracks));
       } catch (e) {
         console.warn('Local storage read error', e);
       }
@@ -291,7 +389,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
             setActivityLogs(mappedLogs);
           }
 
-          // Fetch Settings & Scratchpad
+          // Fetch Settings & Custom Subtracks
           const { data: dbSettings } = await supabase
             .from('drishti_settings')
             .select('*')
@@ -308,6 +406,9 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 theme: dbSettings.theme as ThemeMode,
                 uiScale: dbSettings.ui_scale || 100,
               }));
+            }
+            if (dbSettings.custom_subtracks) {
+              setCustomSubTracks(dbSettings.custom_subtracks);
             }
           }
         } catch (err) {
@@ -455,6 +556,9 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
           }
           if (row.theme) {
             setSettings((prev) => ({ ...prev, theme: row.theme as ThemeMode, uiScale: row.ui_scale || 100 }));
+          }
+          if (row.custom_subtracks) {
+            setCustomSubTracks(row.custom_subtracks);
           }
         }
       })
@@ -704,10 +808,12 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
       cleanUrl = `https://${cleanUrl}`;
     }
 
+    const cleanSubTrack = (subTrack || activeSubTrack || 'General').trim();
+
     const newNode: CourseTreeNode = {
       id: `tree-${Date.now()}`,
       masterTileId,
-      subTrack,
+      subTrack: cleanSubTrack,
       code: code.trim(),
       title: title.trim(),
       url: cleanUrl,
@@ -715,7 +821,10 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
 
     setTreeNodes((prev) => [...prev, newNode]);
-    logActivity(`${newNode.code} ${newNode.title}`, newNode.url, `${masterTileId} / ${subTrack}`, 'doc_tree');
+    logActivity(`${newNode.code} ${newNode.title}`, newNode.url, `${masterTileId} / ${cleanSubTrack}`, 'doc_tree');
+
+    // Auto-register subtrack in customSubTracks
+    addCustomSubTrack(masterTileId, cleanSubTrack);
 
     if (supabase && isSupabaseConfigured()) {
       supabase
@@ -1016,6 +1125,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
       activityLogs,
       settings,
       scratchpadContent,
+      customSubTracks,
     };
     const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -1032,6 +1142,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setRevisionCards(INITIAL_REVISION_CARDS);
     setActivityLogs(INITIAL_ACTIVITY_LOGS);
     setSettings(INITIAL_SETTINGS);
+    setCustomSubTracks({});
   };
 
   return (
@@ -1043,6 +1154,10 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setActiveTileId,
         activeSubTrack,
         setActiveSubTrack,
+        customSubTracks,
+        getSubTracksForTile,
+        addCustomSubTrack,
+        deleteCustomSubTrack,
 
         searchQuery,
         setSearchQuery,

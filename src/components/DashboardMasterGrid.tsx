@@ -20,7 +20,14 @@ import {
 } from 'lucide-react';
 
 export const DashboardMasterGrid: React.FC = () => {
-  const { masterTiles, setActiveTileId, treeNodes, links, revisionCards } = useDrishti();
+  const {
+    masterTiles,
+    setActiveTileId,
+    treeNodes,
+    links,
+    revisionCards,
+    getSubTracksForTile,
+  } = useDrishti();
 
   const getTileIcon = (id: MasterTileId) => {
     switch (id) {
@@ -96,18 +103,23 @@ export const DashboardMasterGrid: React.FC = () => {
               <p className="hub-subtitle">{tile.subtitle}</p>
 
               {/* Subtracks Preview Pills */}
-              <div className="subtracks-pill-row">
-                {tile.subTracks.slice(0, 3).map((track, idx) => (
-                  <span key={idx} className="track-mini-pill">
-                    {track}
-                  </span>
-                ))}
-                {tile.subTracks.length > 3 && (
-                  <span className="track-mini-pill more-pill">
-                    +{tile.subTracks.length - 3} more
-                  </span>
-                )}
-              </div>
+              {(() => {
+                const tracks = getSubTracksForTile(tile.id);
+                return (
+                  <div className="subtracks-pill-row">
+                    {tracks.slice(0, 3).map((track, idx) => (
+                      <span key={idx} className="track-mini-pill">
+                        {track}
+                      </span>
+                    ))}
+                    {tracks.length > 3 && (
+                      <span className="track-mini-pill more-pill">
+                        +{tracks.length - 3} more
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="hub-footer">
