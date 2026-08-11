@@ -107,7 +107,12 @@ const ECHO_GUARD_TTL_MS = 3000;
 
 export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isCloudConnected, setIsCloudConnected] = useState<boolean>(false);
-  const [syncError, setSyncError] = useState<string | null>(null);
+  // Issue #18: warn immediately if Supabase env vars are missing (not just on failure)
+  const [syncError, setSyncError] = useState<string | null>(
+    !isSupabaseConfigured()
+      ? 'Cloud sync disabled — NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY not set. Running in local-only mode.'
+      : null
+  );
   const recentMutations = useRef<Map<string, number>>(new Map());
 
   const trackMutation = (id: string) => {
@@ -319,13 +324,18 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
         } else if (payload.eventType === 'UPDATE') {
           const row = payload.new;
           if (isOwnMutation(row.id)) return;
-          setLinks((prev) => prev.map((l) => l.id === row.id ? {
-            ...l, title: row.title, url: row.url, category: row.category as LinkCategory,
-            description: row.description, isPinned: row.is_pinned, orderIndex: row.order_index,
-            iconType: row.icon_type, iconValue: row.icon_value, tags: row.tags || [],
-            badge: row.badge, accentColor: row.accent_color, clickCount: row.click_count,
-            lastVisited: row.last_visited,
-          } : l));
+          // Issue #14: skip stale out-of-order events using updated_at timestamp
+          setLinks((prev) => prev.map((l) => {
+            if (l.id !== row.id) return l;
+            if (row.updated_at && l.createdAt && new Date(row.updated_at) < new Date(l.createdAt)) return l;
+            return {
+              ...l, title: row.title, url: row.url, category: row.category as LinkCategory,
+              description: row.description, isPinned: row.is_pinned, orderIndex: row.order_index,
+              iconType: row.icon_type, iconValue: row.icon_value, tags: row.tags || [],
+              badge: row.badge, accentColor: row.accent_color, clickCount: row.click_count,
+              lastVisited: row.last_visited,
+            };
+          }));
         } else if (payload.eventType === 'DELETE') {
           setLinks((prev) => prev.filter((l) => l.id !== payload.old.id));
         }
@@ -344,11 +354,16 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
         } else if (payload.eventType === 'UPDATE') {
           const row = payload.new;
           if (isOwnMutation(row.id)) return;
-          setTreeNodes((prev) => prev.map((t) => t.id === row.id ? {
-            ...t, code: row.code, title: row.title, url: row.url,
-            subTrack: row.sub_track, notesSnippet: row.notes_snippet,
-            masterTileId: row.master_tile_id as MasterTileId,
-          } : t));
+          // Issue #14: skip stale out-of-order events
+          setTreeNodes((prev) => prev.map((t) => {
+            if (t.id !== row.id) return t;
+            if (row.updated_at && t.createdAt && new Date(row.updated_at) < new Date(t.createdAt)) return t;
+            return {
+              ...t, code: row.code, title: row.title, url: row.url,
+              subTrack: row.sub_track, notesSnippet: row.notes_snippet,
+              masterTileId: row.master_tile_id as MasterTileId,
+            };
+          }));
         } else if (payload.eventType === 'DELETE') {
           setTreeNodes((prev) => prev.filter((t) => t.id !== payload.old.id));
         }
@@ -370,13 +385,18 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
         } else if (payload.eventType === 'UPDATE') {
           const row = payload.new;
           if (isOwnMutation(row.id)) return;
-          setRevisionCards((prev) => prev.map((c) => c.id === row.id ? {
-            ...c, question: row.question, difficulty: row.difficulty, hint: row.hint,
-            tags: row.tags || [], answerSummary: row.answer_summary,
-            answerMarkdown: row.answer_markdown, keyTakeaways: row.key_takeaways || [],
-            masteryStatus: row.mastery_status, reviewCount: row.review_count,
-            category: row.category as RevisionCategory, masterTileId: row.master_tile_id as MasterTileId,
-          } : c));
+          // Issue #14: skip stale out-of-order events
+          setRevisionCards((prev) => prev.map((c) => {
+            if (c.id !== row.id) return c;
+            if (row.updated_at && c.createdAt && new Date(row.updated_at) < new Date(c.createdAt)) return c;
+            return {
+              ...c, question: row.question, difficulty: row.difficulty, hint: row.hint,
+              tags: row.tags || [], answerSummary: row.answer_summary,
+              answerMarkdown: row.answer_markdown, keyTakeaways: row.key_takeaways || [],
+              masteryStatus: row.mastery_status, reviewCount: row.review_count,
+              category: row.category as RevisionCategory, masterTileId: row.master_tile_id as MasterTileId,
+            };
+          }));
         } else if (payload.eventType === 'DELETE') {
           setRevisionCards((prev) => prev.filter((c) => c.id !== payload.old.id));
         }
@@ -384,11 +404,21 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
       .on('postgres_changes', { event: '*', schema: 'public', table: 'drishti_settings' }, (payload) => {
         if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
           const row = payload.new;
+          // Issue #7: apply fields selectively — only update what changed
+          // so device A saving scratchpad won't overwrite device B's local theme/scale
           if (row.scratchpad_content !== undefined && !isOwnMutation('settings-scratchpad')) {
             setScratchpadContentState(row.scratchpad_content);
           }
-          if (row.theme) setSettings((prev) => ({ ...prev, theme: row.theme as ThemeMode, uiScale: row.ui_scale || 100 }));
-          if (row.custom_subtracks) setCustomSubTracks(row.custom_subtracks);
+          // Only apply theme/scale from cloud if we haven't set them locally in the last 5s
+          if (row.theme && !isOwnMutation('settings-theme')) {
+            setSettings((prev) => ({ ...prev, theme: row.theme as ThemeMode }));
+          }
+          if (row.ui_scale && !isOwnMutation('settings-scale')) {
+            setSettings((prev) => ({ ...prev, uiScale: Math.min(120, Math.max(80, row.ui_scale)) }));
+          }
+          if (row.custom_subtracks) {
+            setCustomSubTracks(row.custom_subtracks);
+          }
         }
       })
       .subscribe((status) => {
@@ -682,12 +712,14 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const setTheme = (theme: ThemeMode) => {
+    trackMutation('settings-theme');
     setSettings((prev) => ({ ...prev, theme }));
     if (supabase && isSupabaseConfigured()) supabase.from('drishti_settings').upsert({ id: 'master_config', theme }).then();
   };
 
   const setUiScale = (uiScale: number) => {
     const clamped = Math.min(120, Math.max(80, uiScale));
+    trackMutation('settings-scale');
     setSettings((prev) => ({ ...prev, uiScale: clamped }));
     if (supabase && isSupabaseConfigured()) supabase.from('drishti_settings').upsert({ id: 'master_config', ui_scale: clamped }).then();
   };

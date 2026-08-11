@@ -106,6 +106,16 @@ export default function Home() {
             gap: 1.5rem;
           }
         }
+
+        @media (max-width: 480px) {
+          .main-content-container {
+            padding: 0.6rem 0.6rem 2rem 0.6rem;
+            gap: 1rem;
+          }
+          .dashboard-master-stack {
+            gap: 1.25rem;
+          }
+        }
       `}</style>
     </main>
   );
