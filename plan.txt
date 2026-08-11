@@ -1,0 +1,92 @@
+# Drishti (दृष्टि) - The 10-Hub Distraction-Free Command Center & Flashcard Deck
+> **Target Audience:** Single-Owner Personal Focus Environment  
+> **Philosophy:** Direct Intent Navigation, 10 Master Focus Hubs, Hierarchical Google Docs Trees, and Active Recall Flashcards.
+
+---
+
+## 1. Executive Summary & Vision
+
+**Drishti** (meaning *vision, focus, and clear perception*) is a custom, self-hosted web command center engineered to eliminate digital friction and bypass algorithm-driven traps on the modern web. 
+
+The landing page presents **10 Dedicated Focus Hubs (Master Tiles)**:
+1. 🤖 **AI & Machine Learning**: ML, DL, Computer Vision, LLMs, Math for AI, RAG & AI Agents.
+2. ⚡ **Coding & DSA**: Arrays, Linked Lists, Trees & BST, Graphs, Dynamic Programming, Heaps & Tries.
+3. 🏛️ **System Design**: Low Level Design (LLD), High Level Design (HLD), Distributed Systems, Architecture Case Studies (Uber, WhatsApp).
+4. 📡 **Recent Update in Market**: Curated ArXiv AI papers, engineering blogs, tech news without clickbait.
+5. 🐙 **Open Source**: Trending AI repositories, PR tracking, framework source reading, good first issues.
+6. 🕉️ **Life Sutras & Wisdom**: Bhagavad Gita reflections (BG 2.47), daily life principles, mindset quotes, personal mantras.
+7. ❤️ **Health & Energy**: Strength & workout protocols, sleep optimization, nutrition, daily energy logs.
+8. 💰 **Finance & Wealth**: Investment portfolio, monthly expense ledger, market watchlist, long-term wealth goals.
+9. 💼 **Apply Job & Career**: Target companies pipeline, resume versions, interview Q&A logs, referrals & outreach.
+10. 🛠️ **Tools & Deep Links**: Distraction-free direct links to AI Tools (ChatGPT, Gemini, Claude), Productivity & Docs (Google Docs, Gmail), Social & Comms (LinkedIn Feed, Reddit, Threads, Facebook, Instagram), and Media/Audio (YouTube, Spotify, ISKCON Desire Tree).
+
+---
+
+## 2. Core Architectural Capabilities
+
+1. **Clean Landing Dashboard**:
+   - The landing page defaults straight to the **10 Focus Hubs (Master Tiles)**.
+   - Removed all extraneous "All Decks" buttons and top category pills.
+   - Global Search (`⌘K`), Theme Switcher (5 themes: Obsidian, Midnight, Cyber Matrix, Sunset, Paper Light), and UI Scale Slider (85% – 120%).
+2. **Master Tile Drilldown & Breadcrumb Navigation**:
+   - Clicking any hub opens its dedicated view with breadcrumb: `Dashboard > [Hub Name] > [Sub-Track]`.
+   - 1-Click back to Dashboard.
+3. **Hierarchical Course & Google Docs Tree (`1.`, `1.1`, `1.1.1`)**:
+   - Automatic level depth based on numbering codes (e.g. `1.` -> `1.1` -> `1.1.1`).
+   - Visual hierarchical tree explorer with expand/collapse branches.
+   - **Below-Tree Box Grid**: Structured document cards arranged directly beneath the tree.
+   - **Cascading Delete**: Deleting a parent node (e.g. `1.1`) automatically removes it and all child subtopics (`1.1.1`, `1.1.2`) from both tree and boxes.
+   - Inline editing directly in the tree or on the cards.
+4. **Active Recall Flashcards (3D Flip)**:
+   - Interactive flashcard decks for each hub with question on the front and answer/notes on the back.
+5. **Streamlined Add Modals**:
+   - Adding links, notes, or flashcards only requires **Title** and **Target Link/URL**.
+6. **Recent 10 Opened Destinations Tracker**:
+   - Automatically records the previous 10 unique destinations opened for 1-click re-opening.
+7. **Daily, Weekly & Monthly Activity Logging & CSV Exporter**:
+   - Comprehensive time-stamped activity tracker with 1-click CSV download.
+
+---
+
+## 3. Component Architecture (`src/`)
+
+```
+src/
+├── app/
+│   ├── layout.tsx                # Root layout with DrishtiProvider
+│   └── page.tsx                  # Main page rendering 10 Master Hubs or Tile Drilldown
+├── components/
+│   ├── Header.tsx                # Clean Header (Brand, Search ⌘K, Theme & Scale)
+│   ├── DashboardMasterGrid.tsx   # The 10 Focus Hub Tiles (AI, Coding, Sys Design, Tools, etc.)
+│   ├── MasterTileDetailView.tsx  # Dedicated Hub View with breadcrumbs and sub-tracks
+│   ├── CourseDocTree.tsx         # Hierarchical Tree (1.1, 1.1.1), below-tree cards & cascading delete
+│   ├── ToolsTileDeck.tsx         # Tools & Deep Links Hub (AI Tools, Docs, Social, Audio)
+│   ├── LinkFlashcard.tsx         # 3D interactive deep link card with inline edit
+│   ├── RevisionFlashcardDeck.tsx # Active recall revision deck with 3D flip
+│   ├── RecentHistoryCard.tsx     # Previous 10 opened destinations tracker
+│   ├── ActivityLogCard.tsx       # Daily / Weekly / Monthly log viewer and CSV exporter
+│   ├── TechRadarCard.tsx         # Ad-free curated RSS engineering pulse
+│   ├── ScratchpadCard.tsx        # Developer zero-latency code & notes sandbox
+│   ├── WisdomFocusCard.tsx       # Vedabase reflection & focus sprint timer
+│   ├── AddEditLinkModal.tsx      # Streamlined Add Link modal (Title + URL)
+│   ├── AddEditRevisionModal.tsx  # Streamlined Add Flashcard modal (Title + URL/Answer)
+│   └── CommandPaletteModal.tsx   # Cmd+K quick spotlight navigation
+├── context/
+│   └── DrishtiContext.tsx        # Central state manager with localStorage persistence
+├── data/
+│   └── initialData.ts            # Pre-seeded 10 master hubs, tree nodes, links, flashcards
+├── styles/
+│   └── globals.css               # Glassmorphism, 5 theme palettes, 3D flip engine
+└── types/
+    └── index.ts                  # TypeScript interfaces
+```
+
+---
+
+## 4. Running Drishti Locally
+
+```bash
+cd /Users/harshramsuratyadav/Documents/Drishti
+npm run dev
+```
+Open **[http://localhost:3000](http://localhost:3000)** in your browser.
