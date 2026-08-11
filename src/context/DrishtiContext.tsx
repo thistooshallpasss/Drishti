@@ -203,7 +203,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
             .select('*')
             .order('order_index', { ascending: true });
 
-          if (dbLinks && dbLinks.length > 0) {
+          if (!linkErr && dbLinks !== null) {
             const mappedLinks: DeepLinkItem[] = dbLinks.map((row) => ({
               id: row.id,
               title: row.title,
@@ -225,12 +225,12 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
           }
 
           // Fetch Tree Nodes (ordered by created_at)
-          const { data: dbTree } = await supabase
+          const { data: dbTree, error: treeErr } = await supabase
             .from('drishti_tree_nodes')
             .select('*')
             .order('created_at', { ascending: true });
 
-          if (dbTree && dbTree.length > 0) {
+          if (!treeErr && dbTree !== null) {
             const mappedTree: CourseTreeNode[] = dbTree.map((row) => ({
               id: row.id,
               masterTileId: row.master_tile_id as MasterTileId,
@@ -245,12 +245,12 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
           }
 
           // Fetch Revision Cards
-          const { data: dbCards } = await supabase
+          const { data: dbCards, error: cardErr } = await supabase
             .from('drishti_revision_cards')
             .select('*')
             .order('created_at', { ascending: false });
 
-          if (dbCards && dbCards.length > 0) {
+          if (!cardErr && dbCards !== null) {
             const mappedCards: RevisionFlashcardItem[] = dbCards.map((row) => ({
               id: row.id,
               masterTileId: row.master_tile_id as MasterTileId,
@@ -271,13 +271,13 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
           // Fetch Activity Logs (last 60 days)
           const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
-          const { data: dbLogs } = await supabase
+          const { data: dbLogs, error: logErr } = await supabase
             .from('drishti_activity_logs')
             .select('*')
             .gte('timestamp', sixtyDaysAgo)
             .order('timestamp', { ascending: false });
 
-          if (dbLogs && dbLogs.length > 0) {
+          if (!logErr && dbLogs !== null) {
             const mappedLogs: ActivityLogItem[] = dbLogs.map((row) => ({
               id: row.id,
               title: row.title,
