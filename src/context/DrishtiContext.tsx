@@ -192,13 +192,17 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
         console.warn('Local storage read error', e);
       }
 
-      // 2. Fetch from Supabase if configured
+      // 2. Fetch from Supabase cloud
       if (supabase && isSupabaseConfigured()) {
         try {
           setIsCloudConnected(true);
 
-          // Fetch Links
-          const { data: dbLinks } = await supabase.from('drishti_links').select('*');
+          // Fetch Links (ordered by order_index)
+          const { data: dbLinks, error: linkErr } = await supabase
+            .from('drishti_links')
+            .select('*')
+            .order('order_index', { ascending: true });
+
           if (dbLinks && dbLinks.length > 0) {
             const mappedLinks: DeepLinkItem[] = dbLinks.map((row) => ({
               id: row.id,
@@ -218,26 +222,14 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
               createdAt: row.created_at,
             }));
             setLinks(mappedLinks);
-          } else {
-            // Seed initial links to cloud on first project setup
-            const seedPayload = INITIAL_LINKS.map((l) => ({
-              id: l.id,
-              title: l.title,
-              url: l.url,
-              category: l.category,
-              description: l.description || '',
-              is_pinned: l.isPinned,
-              order_index: l.orderIndex,
-              tags: l.tags,
-              badge: l.badge || '',
-              click_count: l.clickCount,
-              last_visited: l.lastVisited || '',
-            }));
-            await supabase.from('drishti_links').upsert(seedPayload);
           }
 
-          // Fetch Tree Nodes
-          const { data: dbTree } = await supabase.from('drishti_tree_nodes').select('*');
+          // Fetch Tree Nodes (ordered by created_at)
+          const { data: dbTree } = await supabase
+            .from('drishti_tree_nodes')
+            .select('*')
+            .order('created_at', { ascending: true });
+
           if (dbTree && dbTree.length > 0) {
             const mappedTree: CourseTreeNode[] = dbTree.map((row) => ({
               id: row.id,
@@ -250,20 +242,14 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
               createdAt: row.created_at,
             }));
             setTreeNodes(mappedTree);
-          } else {
-            const seedTree = INITIAL_COURSE_TREE_NODES.map((t) => ({
-              id: t.id,
-              master_tile_id: t.masterTileId,
-              sub_track: t.subTrack,
-              code: t.code,
-              title: t.title,
-              url: t.url,
-            }));
-            await supabase.from('drishti_tree_nodes').upsert(seedTree);
           }
 
           // Fetch Revision Cards
-          const { data: dbCards } = await supabase.from('drishti_revision_cards').select('*');
+          const { data: dbCards } = await supabase
+            .from('drishti_revision_cards')
+            .select('*')
+            .order('created_at', { ascending: false });
+
           if (dbCards && dbCards.length > 0) {
             const mappedCards: RevisionFlashcardItem[] = dbCards.map((row) => ({
               id: row.id,
@@ -281,22 +267,6 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
               createdAt: row.created_at,
             }));
             setRevisionCards(mappedCards);
-          } else {
-            const seedCards = INITIAL_REVISION_CARDS.map((c) => ({
-              id: c.id,
-              master_tile_id: c.masterTileId,
-              category: c.category,
-              question: c.question,
-              difficulty: c.difficulty,
-              hint: c.hint,
-              tags: c.tags,
-              answer_summary: c.answerSummary,
-              answer_markdown: c.answerMarkdown,
-              key_takeaways: c.keyTakeaways,
-              mastery_status: c.masteryStatus,
-              review_count: c.reviewCount,
-            }));
-            await supabase.from('drishti_revision_cards').upsert(seedCards);
           }
 
           // Fetch Activity Logs (last 60 days)
@@ -341,7 +311,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
             }
           }
         } catch (err) {
-          console.warn('Supabase cloud fetch error', err);
+          console.warn('[Supabase Init Error]', err);
         }
       }
     };
@@ -349,12 +319,12 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     initData();
   }, [filter60DayLogs]);
 
-  // Real-Time Subscription across all devices
+  // Real-Time WebSocket Channel across all devices
   useEffect(() => {
     if (!supabase || !isSupabaseConfigured()) return;
 
     const channel = supabase
-      .channel('drishti-global-sync')
+      .channel('drishti-live-channel')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'drishti_links' }, (payload) => {
         if (payload.eventType === 'INSERT') {
           const row = payload.new;
@@ -435,6 +405,46 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
           );
         } else if (payload.eventType === 'DELETE') {
           setTreeNodes((prev) => prev.filter((t) => t.id !== payload.old.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'drishti_revision_cards' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const row = payload.new;
+          setRevisionCards((prev) => {
+            if (prev.some((c) => c.id === row.id)) return prev;
+            const card: RevisionFlashcardItem = {
+              id: row.id,
+              masterTileId: row.master_tile_id as MasterTileId,
+              category: row.category as RevisionCategory,
+              question: row.question,
+              difficulty: row.difficulty,
+              hint: row.hint,
+              tags: row.tags || [],
+              answerSummary: row.answer_summary,
+              answerMarkdown: row.answer_markdown,
+              keyTakeaways: row.key_takeaways || [],
+              masteryStatus: row.mastery_status,
+              reviewCount: row.review_count,
+              createdAt: row.created_at,
+            };
+            return [card, ...prev];
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          const row = payload.new;
+          setRevisionCards((prev) =>
+            prev.map((c) =>
+              c.id === row.id
+                ? {
+                    ...c,
+                    question: row.question,
+                    answerSummary: row.answer_summary,
+                    masteryStatus: row.mastery_status,
+                  }
+                : c
+            )
+          );
+        } else if (payload.eventType === 'DELETE') {
+          setRevisionCards((prev) => prev.filter((c) => c.id !== payload.old.id));
         }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'drishti_settings' }, (payload) => {
@@ -555,7 +565,9 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
           date_str: newLog.dateStr,
           time_str: newLog.timeStr,
         })
-        .then();
+        .then(({ error }) => {
+          if (error) console.error('[Supabase Log Insert Error]', error);
+        });
     }
   };
 
@@ -574,7 +586,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return recents;
   }, [activityLogs]);
 
-  // Link Management with Real-Time Cloud Sync
+  // Link Management with Full Upsert to Cloud
   const addLink = (title: string, url: string, category: LinkCategory = 'ai') => {
     let cleanUrl = url.trim();
     if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
@@ -601,7 +613,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (supabase && isSupabaseConfigured()) {
       supabase
         .from('drishti_links')
-        .insert({
+        .upsert({
           id: item.id,
           title: item.title,
           url: item.url,
@@ -614,34 +626,52 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
           click_count: item.clickCount,
           last_visited: item.lastVisited || '',
         })
-        .then();
+        .then(({ error }) => {
+          if (error) console.error('[Supabase Link Add Error]', error);
+        });
     }
   };
 
   const updateLink = (id: string, updates: Partial<DeepLinkItem>) => {
-    setLinks((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, ...updates } : item))
-    );
+    setLinks((prev) => {
+      const updated = prev.map((item) => (item.id === id ? { ...item, ...updates } : item));
+      const target = updated.find((item) => item.id === id);
 
-    if (supabase && isSupabaseConfigured()) {
-      const dbUpdates: Record<string, any> = {};
-      if (updates.title !== undefined) dbUpdates.title = updates.title;
-      if (updates.url !== undefined) dbUpdates.url = updates.url;
-      if (updates.category !== undefined) dbUpdates.category = updates.category;
-      if (updates.description !== undefined) dbUpdates.description = updates.description;
-      if (updates.isPinned !== undefined) dbUpdates.is_pinned = updates.isPinned;
-      if (updates.tags !== undefined) dbUpdates.tags = updates.tags;
-      if (updates.clickCount !== undefined) dbUpdates.click_count = updates.clickCount;
-      if (updates.lastVisited !== undefined) dbUpdates.last_visited = updates.lastVisited;
-
-      supabase.from('drishti_links').update(dbUpdates).eq('id', id).then();
-    }
+      if (target && supabase && isSupabaseConfigured()) {
+        supabase
+          .from('drishti_links')
+          .upsert({
+            id: target.id,
+            title: target.title,
+            url: target.url,
+            category: target.category,
+            description: target.description || '',
+            is_pinned: target.isPinned,
+            order_index: target.orderIndex,
+            tags: target.tags || [],
+            badge: target.badge || '',
+            click_count: target.clickCount,
+            last_visited: target.lastVisited || '',
+            updated_at: new Date().toISOString(),
+          })
+          .then(({ error }) => {
+            if (error) console.error('[Supabase Link Update Error]', error);
+          });
+      }
+      return updated;
+    });
   };
 
   const deleteLink = (id: string) => {
     setLinks((prev) => prev.filter((item) => item.id !== id));
     if (supabase && isSupabaseConfigured()) {
-      supabase.from('drishti_links').delete().eq('id', id).then();
+      supabase
+        .from('drishti_links')
+        .delete()
+        .eq('id', id)
+        .then(({ error }) => {
+          if (error) console.error('[Supabase Link Delete Error]', error);
+        });
     }
   };
 
@@ -690,7 +720,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (supabase && isSupabaseConfigured()) {
       supabase
         .from('drishti_tree_nodes')
-        .insert({
+        .upsert({
           id: newNode.id,
           master_tile_id: newNode.masterTileId,
           sub_track: newNode.subTrack,
@@ -698,23 +728,35 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
           title: newNode.title,
           url: newNode.url,
         })
-        .then();
+        .then(({ error }) => {
+          if (error) console.error('[Supabase Tree Add Error]', error);
+        });
     }
   };
 
   const updateTreeNode = (id: string, updates: Partial<CourseTreeNode>) => {
-    setTreeNodes((prev) =>
-      prev.map((node) => (node.id === id ? { ...node, ...updates } : node))
-    );
+    setTreeNodes((prev) => {
+      const updated = prev.map((node) => (node.id === id ? { ...node, ...updates } : node));
+      const target = updated.find((node) => node.id === id);
 
-    if (supabase && isSupabaseConfigured()) {
-      const dbUpdates: Record<string, any> = {};
-      if (updates.code !== undefined) dbUpdates.code = updates.code;
-      if (updates.title !== undefined) dbUpdates.title = updates.title;
-      if (updates.url !== undefined) dbUpdates.url = updates.url;
-      if (updates.subTrack !== undefined) dbUpdates.sub_track = updates.subTrack;
-      supabase.from('drishti_tree_nodes').update(dbUpdates).eq('id', id).then();
-    }
+      if (target && supabase && isSupabaseConfigured()) {
+        supabase
+          .from('drishti_tree_nodes')
+          .upsert({
+            id: target.id,
+            master_tile_id: target.masterTileId,
+            sub_track: target.subTrack,
+            code: target.code,
+            title: target.title,
+            url: target.url,
+            updated_at: new Date().toISOString(),
+          })
+          .then(({ error }) => {
+            if (error) console.error('[Supabase Tree Update Error]', error);
+          });
+      }
+      return updated;
+    });
   };
 
   const deleteTreeNodeCascade = (id: string) => {
@@ -748,7 +790,13 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     );
 
     if (supabase && isSupabaseConfigured() && idsToDelete.length > 0) {
-      supabase.from('drishti_tree_nodes').delete().in('id', idsToDelete).then();
+      supabase
+        .from('drishti_tree_nodes')
+        .delete()
+        .in('id', idsToDelete)
+        .then(({ error }) => {
+          if (error) console.error('[Supabase Tree Delete Error]', error);
+        });
     }
   };
 
@@ -824,7 +872,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (supabase && isSupabaseConfigured()) {
       supabase
         .from('drishti_revision_cards')
-        .insert({
+        .upsert({
           id: card.id,
           master_tile_id: card.masterTileId,
           category: card.category,
@@ -837,49 +885,65 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
           mastery_status: card.masteryStatus,
           review_count: card.reviewCount,
         })
-        .then();
+        .then(({ error }) => {
+          if (error) console.error('[Supabase Revision Add Error]', error);
+        });
     }
   };
 
   const updateRevisionCard = (id: string, updates: Partial<RevisionFlashcardItem>) => {
-    setRevisionCards((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, ...updates } : c))
-    );
+    setRevisionCards((prev) => {
+      const updated = prev.map((c) => (c.id === id ? { ...c, ...updates } : c));
+      const target = updated.find((c) => c.id === id);
 
-    if (supabase && isSupabaseConfigured()) {
-      const dbUpdates: Record<string, any> = {};
-      if (updates.question !== undefined) dbUpdates.question = updates.question;
-      if (updates.answerSummary !== undefined) dbUpdates.answer_summary = updates.answerSummary;
-      if (updates.masteryStatus !== undefined) dbUpdates.mastery_status = updates.masteryStatus;
-      supabase.from('drishti_revision_cards').update(dbUpdates).eq('id', id).then();
-    }
+      if (target && supabase && isSupabaseConfigured()) {
+        supabase
+          .from('drishti_revision_cards')
+          .upsert({
+            id: target.id,
+            master_tile_id: target.masterTileId,
+            category: target.category,
+            question: target.question,
+            difficulty: target.difficulty,
+            tags: target.tags,
+            answer_summary: target.answerSummary,
+            answer_markdown: target.answerMarkdown,
+            key_takeaways: target.keyTakeaways,
+            mastery_status: target.masteryStatus,
+            review_count: target.reviewCount,
+            updated_at: new Date().toISOString(),
+          })
+          .then(({ error }) => {
+            if (error) console.error('[Supabase Revision Update Error]', error);
+          });
+      }
+      return updated;
+    });
   };
 
   const deleteRevisionCard = (id: string) => {
     setRevisionCards((prev) => prev.filter((c) => c.id !== id));
     if (supabase && isSupabaseConfigured()) {
-      supabase.from('drishti_revision_cards').delete().eq('id', id).then();
+      supabase
+        .from('drishti_revision_cards')
+        .delete()
+        .eq('id', id)
+        .then(({ error }) => {
+          if (error) console.error('[Supabase Revision Delete Error]', error);
+        });
     }
   };
 
   const toggleMasteryStatus = (id: string) => {
-    setRevisionCards((prev) =>
-      prev.map((c) => {
-        if (c.id === id) {
-          const nextStatus: Record<string, 'learning' | 'reviewing' | 'mastered'> = {
-            learning: 'reviewing',
-            reviewing: 'mastered',
-            mastered: 'learning',
-          };
-          const newStatus = nextStatus[c.masteryStatus] || 'learning';
-          if (supabase && isSupabaseConfigured()) {
-            supabase.from('drishti_revision_cards').update({ mastery_status: newStatus }).eq('id', id).then();
-          }
-          return { ...c, masteryStatus: newStatus };
-        }
-        return c;
-      })
-    );
+    const target = revisionCards.find((c) => c.id === id);
+    if (!target) return;
+    const nextStatus: Record<string, 'learning' | 'reviewing' | 'mastered'> = {
+      learning: 'reviewing',
+      reviewing: 'mastered',
+      mastered: 'learning',
+    };
+    const newStatus = nextStatus[target.masteryStatus] || 'learning';
+    updateRevisionCard(id, { masteryStatus: newStatus });
   };
 
   // Customization & Themes
