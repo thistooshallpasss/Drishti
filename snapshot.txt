@@ -1,7 +1,7 @@
 ================================================================================
 DRISHTI (दृष्टि) - COMPLETE CODEBASE SNAPSHOT
-Generated on: 2026-08-16 21:15:39
-Total files captured: 30
+Generated on: 2026-08-16 21:26:14
+Total files captured: 28
 ================================================================================
 
 PROJECT FILE TREE:
@@ -27,9 +27,7 @@ PROJECT FILE TREE:
 │   │   ├── LinkFlashcard.tsx
 │   │   ├── LinkFlashcardDeck.tsx
 │   │   ├── MasterTileDetailView.tsx
-│   │   ├── RecentHistoryCard.tsx
-│   │   ├── TechRadarCard.tsx
-│   │   └── ToolsTileDeck.tsx
+│   │   └── RecentHistoryCard.tsx
 │   ├── context
 │   │   └── DrishtiContext.tsx
 │   ├── data
@@ -95,6 +93,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+plan.txt
+snapshot.txt
+step.txt
+reset_database.sql
+supabase_schema.sql
+snapshot.py
 
 
 ================================================================================
@@ -322,8 +327,6 @@ npm run dev
 ```
 Open **[http://localhost:3000](http://localhost:3000)** in your browser.
 
-
-i want to add this feature of downloading notes in activity tracker section i will have log of my activites on net and notes of my recorded things both seperately but at one place i want to add this feature that for each activity or note i can download that as a text file with the title and the note content .
 
 
 
@@ -2622,7 +2625,6 @@ Activity Summary:
                     {log.type.replace('_', ' ')}
                   </span>
                   <span className="log-time">{log.timeStr || log.dateStr}</span>
-                  <span className="log-category-pill">{log.category}</span>
                 </div>
 
                 <div className="log-center-title" title={log.url}>
@@ -5705,7 +5707,7 @@ FILE: src/components/LinkFlashcard.tsx
 'use client';
 
 import React, { useState } from 'react';
-import { DeepLinkItem, LinkCategory } from '@/types';
+import { DeepLinkItem } from '@/types';
 import { useDrishti } from '@/context/DrishtiContext';
 import {
   ExternalLink,
@@ -5714,7 +5716,6 @@ import {
   Trash2,
   Check,
   X,
-  RotateCw,
   Flame,
 } from 'lucide-react';
 
@@ -5729,7 +5730,7 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
   const [isFlipped, setIsFlipped] = useState(false);
   const [editTitle, setEditTitle] = useState(link.title);
   const [editUrl, setEditUrl] = useState(link.url);
-  const [editCategory, setEditCategory] = useState<LinkCategory>(link.category);
+  const [editDesc, setEditDesc] = useState(link.description || '');
   const [faviconError, setFaviconError] = useState(false);
 
   // Extract domain for favicon lookup
@@ -5764,14 +5765,14 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
     updateLink(link.id, {
       title: editTitle.trim(),
       url: cleanUrl,
-      category: editCategory,
+      description: editDesc.trim(),
     });
     setIsFlipped(false);
   };
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm(`Remove "${link.title}" from your Drishti launchpad?`)) {
+    if (confirm(`Remove "${link.title}"?`)) {
       deleteLink(link.id);
     }
   };
@@ -5784,14 +5785,11 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
     >
       <div className={`flashcard-3d-wrapper ${isFlipped ? 'is-flipped' : ''}`}>
         {/* ================= FRONT FACE ================= */}
-        <div className="flashcard-face bento-card card-front">
-          {/* Top Bar: Category & Actions */}
-          <div className="card-top-bar">
-            <div className="category-pill-wrap">
-              <span className={`category-badge cat-${link.category}`}>
-                {link.category.toUpperCase()}
-              </span>
-              {link.badge && <span className="custom-subbadge">{link.badge}</span>}
+        <div className="flashcard-face bento-card card-front" onClick={handleLaunch}>
+          {/* Top Bar: Pin & Edit Actions */}
+          <div className="card-top-bar" onClick={(e) => e.stopPropagation()}>
+            <div className="card-domain-badge">
+              <span className="domain-text">{domain}</span>
             </div>
 
             <div className="action-icons-wrap">
@@ -5802,7 +5800,7 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
                   togglePinLink(link.id);
                 }}
                 className={`pin-btn ${link.isPinned ? 'pinned-active' : ''}`}
-                title={link.isPinned ? 'Unpin card' : 'Pin card to top'}
+                title={link.isPinned ? 'Unpin item' : 'Pin item to top'}
               >
                 <Pin size={14} />
               </button>
@@ -5813,19 +5811,28 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
                   e.stopPropagation();
                   setEditTitle(link.title);
                   setEditUrl(link.url);
-                  setEditCategory(link.category);
+                  setEditDesc(link.description || '');
                   setIsFlipped(true);
                 }}
                 className="flip-btn"
-                title="Flip to Edit Card"
+                title="Edit details"
               >
                 <Edit3 size={14} />
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDelete}
+                className="delete-card-btn"
+                title="Delete"
+              >
+                <Trash2 size={14} />
               </button>
             </div>
           </div>
 
           {/* Card Middle: Favicon & Title */}
-          <div className="card-body-section" onClick={handleLaunch}>
+          <div className="card-body-section">
             <div className="icon-launch-row">
               <div className="favicon-box">
                 {!faviconError ? (
@@ -5844,43 +5851,28 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
 
               <div className="title-url-box">
                 <h3 className="link-title">{link.title}</h3>
-                <span className="link-domain-preview">{domain}</span>
+                {link.description && (
+                  <p className="link-desc-text">{link.description}</p>
+                )}
               </div>
             </div>
-
-            {link.description && (
-              <p className="link-desc-text">{link.description}</p>
-            )}
-
-            {/* Tags Row */}
-            {link.tags && link.tags.length > 0 && (
-              <div className="tags-row">
-                {link.tags.slice(0, 2).map((tag, idx) => (
-                  <span key={idx} className="tag-chip">
-                    #{tag}
-                  </span>
-                ))}
-              </div>
-            )}
           </div>
 
-          {/* Card Footer: Usage & Direct Launch Action */}
-          <div className="card-footer-section">
+          {/* Card Footer */}
+          <div className="card-footer-section" onClick={(e) => e.stopPropagation()}>
             <div className="stats-indicator">
               {link.clickCount > 0 && (
                 <span className="clicks-badge" title="Total launches">
-                  <Flame size={12} className="flame-icon" /> {link.clickCount}
+                  <Flame size={12} className="flame-icon" /> {link.clickCount} launches
                 </span>
-              )}
-              {link.lastVisited && (
-                <span className="last-visited-text">Last: {link.lastVisited}</span>
               )}
             </div>
 
             <button
+              type="button"
               onClick={handleLaunch}
               className="launch-direct-btn"
-              title={`Open ${link.url}`}
+              title="Open Destination"
             >
               <span>Launch</span>
               <ExternalLink size={13} />
@@ -5888,73 +5880,70 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
           </div>
         </div>
 
-        {/* ================= BACK FACE (FLIP EDIT) ================= */}
-        <div className="flashcard-face flashcard-face-back bento-card card-back">
-          <div className="back-header">
-            <div className="back-title-wrap">
-              <RotateCw size={13} className="rotate-icon" />
-              <span>Edit Flashcard</span>
-            </div>
+        {/* ================= BACK FACE (EDIT FORM) ================= */}
+        <div
+          className="flashcard-face bento-card card-back"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="edit-header-row">
+            <h4 className="edit-heading">Edit Document / Link</h4>
             <button
               type="button"
               onClick={() => setIsFlipped(false)}
-              className="btn-icon close-flip-btn"
-              title="Cancel Edit"
+              className="close-flip-btn"
+              title="Cancel"
             >
-              <X size={13} />
+              <X size={15} />
             </button>
           </div>
 
-          <form onSubmit={handleSaveEdit} className="back-edit-form">
-            <div className="form-field">
-              <label>Name</label>
+          <form onSubmit={handleSaveEdit} className="edit-form-body">
+            <div className="input-group">
+              <label className="input-label">Title</label>
               <input
                 type="text"
                 value={editTitle}
                 onChange={(e) => setEditTitle(e.target.value)}
-                placeholder="Name"
+                placeholder="e.g. ChatGPT or System Design Doc"
+                className="edit-text-input"
                 required
-                autoFocus
               />
             </div>
 
-            <div className="form-field">
-              <label>Target URL</label>
+            <div className="input-group">
+              <label className="input-label">Destination URL</label>
               <input
                 type="text"
                 value={editUrl}
                 onChange={(e) => setEditUrl(e.target.value)}
                 placeholder="https://..."
+                className="edit-text-input"
                 required
               />
             </div>
 
-            <div className="form-field">
-              <label>Category</label>
-              <select
-                value={editCategory}
-                onChange={(e) => setEditCategory(e.target.value as LinkCategory)}
-              >
-                <option value="ai">AI Powerhouse</option>
-                <option value="productivity">Productivity & Docs</option>
-                <option value="social">Social & Comms</option>
-                <option value="spiritual">Spiritual Wisdom</option>
-                <option value="media">Media & Audio</option>
-                <option value="custom">Custom</option>
-              </select>
+            <div className="input-group">
+              <label className="input-label">Description (Optional)</label>
+              <input
+                type="text"
+                value={editDesc}
+                onChange={(e) => setEditDesc(e.target.value)}
+                placeholder="Short note or description"
+                className="edit-text-input"
+              />
             </div>
 
-            <div className="back-action-buttons">
+            <div className="edit-actions-row">
               <button
                 type="button"
                 onClick={handleDelete}
-                className="delete-card-btn"
-                title="Delete Link"
+                className="btn-danger-mini"
               >
                 <Trash2 size={13} />
+                <span>Delete</span>
               </button>
 
-              <button type="submit" className="btn-primary save-flip-btn">
+              <button type="submit" className="btn-primary-mini">
                 <Check size={13} />
                 <span>Save</span>
               </button>
@@ -5965,14 +5954,8 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
 
       <style jsx>{`
         .link-card-container {
-          height: 210px;
-          position: relative;
-          perspective: 1200px;
-          transition: z-index 0.3s ease;
-        }
-
-        .link-card-container.is-flipped-container {
-          z-index: 50 !important;
+          perspective: 1000px;
+          height: 190px;
           position: relative;
         }
 
@@ -5980,8 +5963,8 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
           position: relative;
           width: 100%;
           height: 100%;
+          transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
           transform-style: preserve-3d;
-          transition: transform 0.5s cubic-bezier(0.2, 0.85, 0.32, 1.2);
         }
 
         .flashcard-3d-wrapper.is-flipped {
@@ -5990,41 +5973,35 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
 
         .flashcard-face {
           position: absolute;
-          inset: 0;
           width: 100%;
           height: 100%;
           backface-visibility: hidden;
           -webkit-backface-visibility: hidden;
-          border-radius: 16px;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          padding: 1rem 1.15rem;
+          border-radius: 14px;
         }
 
         .card-front {
-          display: flex;
-          flex-direction: column;
-          justify-content: space-between;
-          padding: 1rem 1.1rem;
-          height: 100%;
+          cursor: pointer;
           border: 1px solid var(--border-card);
+          transition: var(--transition-bounce);
         }
 
-        .card-back {
-          transform: rotateY(180deg);
-          display: flex;
-          flex-direction: column;
-          justify-content: space-between;
-          padding: 0.9rem 1rem;
-          height: 100%;
-          border: 1px solid var(--accent-primary);
-          background: var(--bg-surface);
-          box-shadow: 0 15px 35px rgba(0, 0, 0, 0.7);
+        .card-front:hover {
+          border-color: var(--accent-primary);
+          transform: translateY(-3px);
+          box-shadow: var(--card-shadow-hover);
         }
 
         .is-pinned .card-front {
-          border-color: var(--badge-pinned-border);
+          border-color: rgba(56, 189, 248, 0.4);
           background: linear-gradient(
-            145deg,
-            var(--badge-pinned-bg) 0%,
-            var(--bg-glass-card) 50%
+            135deg,
+            rgba(56, 189, 248, 0.05) 0%,
+            var(--bg-glass-card) 100%
           );
         }
 
@@ -6034,120 +6011,82 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
           justify-content: space-between;
         }
 
-        .category-pill-wrap {
-          display: flex;
-          align-items: center;
-          gap: 0.4rem;
-        }
-
-        .category-badge {
-          font-size: 0.65rem;
-          font-weight: 700;
-          letter-spacing: 0.05em;
-          padding: 0.15rem 0.45rem;
-          border-radius: 6px;
-          text-transform: uppercase;
-        }
-
-        .cat-social {
-          background: rgba(59, 130, 246, 0.15);
-          color: #60a5fa;
-          border: 1px solid rgba(59, 130, 246, 0.3);
-        }
-
-        .cat-productivity {
-          background: rgba(16, 185, 129, 0.15);
-          color: #34d399;
-          border: 1px solid rgba(16, 185, 129, 0.3);
-        }
-
-        .cat-ai {
-          background: rgba(168, 85, 247, 0.18);
-          color: #c084fc;
-          border: 1px solid rgba(168, 85, 247, 0.35);
-        }
-
-        .cat-media {
-          background: rgba(239, 68, 68, 0.15);
-          color: #f87171;
-          border: 1px solid rgba(239, 68, 68, 0.3);
-        }
-
-        .cat-spiritual {
-          background: rgba(245, 158, 11, 0.15);
-          color: #fbbf24;
-          border: 1px solid rgba(245, 158, 11, 0.35);
-        }
-
-        .custom-subbadge {
-          font-size: 0.62rem;
-          padding: 0.12rem 0.35rem;
-          background: var(--bg-surface-elevated);
-          border-radius: 4px;
+        .card-domain-badge {
+          font-size: 0.7rem;
+          font-family: var(--font-mono);
           color: var(--text-muted);
+          background: var(--bg-surface-elevated);
+          padding: 0.15rem 0.5rem;
+          border-radius: 6px;
+          border: 1px solid var(--border-subtle);
+          max-width: 130px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
 
         .action-icons-wrap {
           display: flex;
           align-items: center;
-          gap: 0.35rem;
+          gap: 0.3rem;
         }
 
         .pin-btn,
-        .flip-btn {
-          width: 26px;
-          height: 26px;
-          border-radius: 6px;
+        .flip-btn,
+        .delete-card-btn {
           background: transparent;
-          border: 1px solid transparent;
+          border: none;
           color: var(--text-muted);
-          display: inline-flex;
+          padding: 0.3rem;
+          border-radius: 6px;
+          cursor: pointer;
+          display: flex;
           align-items: center;
           justify-content: center;
-          cursor: pointer;
-          transition: var(--transition-smooth);
+          transition: all 0.2s ease;
         }
 
         .pin-btn:hover,
         .flip-btn:hover {
-          background: var(--bg-surface-elevated);
           color: var(--text-primary);
-          border-color: var(--border-subtle);
+          background: rgba(255, 255, 255, 0.08);
         }
 
-        .pinned-active {
-          color: var(--badge-pinned-text);
-          background: var(--badge-pinned-bg);
-          border-color: var(--badge-pinned-border);
+        .pin-btn.pinned-active {
+          color: var(--accent-primary);
+          background: rgba(56, 189, 248, 0.15);
+        }
+
+        .delete-card-btn:hover {
+          color: #ef4444;
+          background: rgba(239, 68, 68, 0.12);
         }
 
         .card-body-section {
           flex: 1;
-          cursor: pointer;
           display: flex;
           flex-direction: column;
           justify-content: center;
-          padding: 0.3rem 0;
+          margin: 0.3rem 0;
         }
 
         .icon-launch-row {
           display: flex;
-          align-items: center;
+          align-items: flex-start;
           gap: 0.75rem;
         }
 
         .favicon-box {
-          width: 38px;
-          height: 38px;
+          width: 36px;
+          height: 36px;
           border-radius: 10px;
           background: var(--bg-surface-elevated);
           border: 1px solid var(--border-card);
           display: flex;
           align-items: center;
           justify-content: center;
-          overflow: hidden;
           flex-shrink: 0;
-          box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+          overflow: hidden;
         }
 
         .favicon-img {
@@ -6157,202 +6096,174 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
         }
 
         .fallback-monogram {
-          font-weight: 800;
-          font-size: 0.85rem;
+          font-size: 0.75rem;
+          font-weight: 700;
           color: var(--accent-primary);
+          font-family: var(--font-mono);
         }
 
         .title-url-box {
+          flex: 1;
           overflow: hidden;
         }
 
         .link-title {
-          font-size: 1rem;
+          font-size: 0.96rem;
           font-weight: 700;
           color: var(--text-primary);
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          line-height: 1.25;
-        }
-
-        .link-domain-preview {
-          font-size: 0.7rem;
-          color: var(--text-muted);
-          font-family: var(--font-mono);
-          display: block;
+          line-height: 1.3;
         }
 
         .link-desc-text {
-          font-size: 0.74rem;
-          color: var(--text-secondary);
+          font-size: 0.73rem;
+          color: var(--text-muted);
           line-height: 1.35;
-          margin-top: 0.25rem;
+          margin-top: 0.2rem;
           display: -webkit-box;
           -webkit-line-clamp: 2;
           -webkit-box-orient: vertical;
           overflow: hidden;
         }
 
-        .tags-row {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 0.3rem;
-          margin-top: 0.3rem;
-        }
-
-        .tag-chip {
-          font-size: 0.65rem;
-          color: var(--text-muted);
-          background: var(--bg-surface);
-          padding: 0.1rem 0.35rem;
-          border-radius: 4px;
-        }
-
         .card-footer-section {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding-top: 0.45rem;
+          padding-top: 0.4rem;
           border-top: 1px solid var(--border-subtle);
         }
 
         .stats-indicator {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
+          font-size: 0.7rem;
+          color: var(--text-muted);
+          font-family: var(--font-mono);
         }
 
         .clicks-badge {
-          font-size: 0.7rem;
-          font-weight: 600;
-          color: #f97316;
           display: inline-flex;
           align-items: center;
-          gap: 0.2rem;
-        }
-
-        .last-visited-text {
-          font-size: 0.65rem;
-          color: var(--text-muted);
+          gap: 0.25rem;
+          color: #f97316;
         }
 
         .launch-direct-btn {
-          background: var(--bg-surface-elevated);
-          border: 1px solid var(--border-card);
-          color: var(--text-primary);
-          padding: 0.3rem 0.7rem;
-          border-radius: 7px;
-          font-size: 0.76rem;
-          font-weight: 600;
           display: inline-flex;
           align-items: center;
           gap: 0.35rem;
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          color: var(--text-secondary);
+          padding: 0.25rem 0.65rem;
+          border-radius: 6px;
+          font-size: 0.74rem;
+          font-weight: 600;
           cursor: pointer;
-          transition: var(--transition-smooth);
+          transition: all 0.2s ease;
         }
 
         .launch-direct-btn:hover {
           background: var(--accent-primary);
           color: #030712;
           border-color: var(--accent-primary);
-          transform: translateY(-1px);
         }
 
-        /* BACK FACE FLIP EDIT STYLES */
-        .back-header {
+        /* BACK FACE */
+        .card-back {
+          transform: rotateY(180deg);
+          background: var(--bg-surface-elevated);
+          border: 1px solid var(--border-card);
+        }
+
+        .edit-header-row {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding-bottom: 0.3rem;
-          border-bottom: 1px solid var(--border-subtle);
+          margin-bottom: 0.3rem;
         }
 
-        .back-title-wrap {
-          display: flex;
-          align-items: center;
-          gap: 0.35rem;
-          font-size: 0.76rem;
+        .edit-heading {
+          font-size: 0.84rem;
           font-weight: 700;
-          color: var(--accent-primary);
-          text-transform: uppercase;
-          letter-spacing: 0.04em;
-        }
-
-        .rotate-icon {
-          animation: spinOnce 0.4s ease;
+          color: var(--text-primary);
         }
 
         .close-flip-btn {
-          width: 24px;
-          height: 24px;
-        }
-
-        .back-edit-form {
-          display: flex;
-          flex-direction: column;
-          gap: 0.35rem;
-          flex: 1;
-          justify-content: space-around;
-        }
-
-        .form-field {
-          display: flex;
-          flex-direction: column;
-          gap: 0.1rem;
-        }
-
-        .form-field label {
-          font-size: 0.65rem;
+          background: transparent;
+          border: none;
           color: var(--text-muted);
-          font-weight: 600;
-        }
-
-        .form-field input,
-        .form-field select {
-          background: var(--bg-input);
-          border: 1px solid var(--border-card);
-          color: var(--text-primary);
-          padding: 0.28rem 0.45rem;
-          border-radius: 6px;
-          font-size: 0.78rem;
-          outline: none;
-        }
-
-        .form-field input:focus,
-        .form-field select:focus {
-          border-color: var(--accent-primary);
-        }
-
-        .back-action-buttons {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding-top: 0.3rem;
-          border-top: 1px solid var(--border-subtle);
-        }
-
-        .delete-card-btn {
-          background: rgba(239, 68, 68, 0.1);
-          border: 1px solid rgba(239, 68, 68, 0.3);
-          color: #ef4444;
-          width: 28px;
-          height: 28px;
-          border-radius: 6px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
           cursor: pointer;
         }
 
-        .delete-card-btn:hover {
-          background: #ef4444;
-          color: #ffffff;
+        .edit-form-body {
+          display: flex;
+          flex-direction: column;
+          gap: 0.4rem;
+          flex: 1;
         }
 
-        .save-flip-btn {
-          padding: 0.3rem 0.75rem;
+        .input-group {
+          display: flex;
+          flex-direction: column;
+          gap: 0.15rem;
+        }
+
+        .input-label {
+          font-size: 0.64rem;
+          color: var(--text-muted);
+          font-weight: 600;
+          text-transform: uppercase;
+        }
+
+        .edit-text-input {
+          background: var(--bg-surface);
+          border: 1px solid var(--border-card);
+          padding: 0.3rem 0.5rem;
+          border-radius: 6px;
+          color: #ffffff;
           font-size: 0.76rem;
+          outline: none;
+        }
+
+        .edit-text-input:focus {
+          border-color: var(--accent-primary);
+        }
+
+        .edit-actions-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-top: auto;
+        }
+
+        .btn-danger-mini {
+          background: rgba(239, 68, 68, 0.12);
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          color: #ef4444;
+          padding: 0.25rem 0.6rem;
+          border-radius: 6px;
+          font-size: 0.72rem;
+          font-weight: 600;
+          display: inline-flex;
+          align-items: center;
+          gap: 0.3rem;
+          cursor: pointer;
+        }
+
+        .btn-primary-mini {
+          background: var(--accent-primary);
+          border: none;
+          color: #030712;
+          padding: 0.25rem 0.75rem;
+          border-radius: 6px;
+          font-size: 0.72rem;
+          font-weight: 700;
+          display: inline-flex;
+          align-items: center;
+          gap: 0.3rem;
+          cursor: pointer;
         }
       `}</style>
     </div>
@@ -6693,8 +6604,6 @@ FILE: src/components/MasterTileDetailView.tsx
 import React, { useState } from 'react';
 import { useDrishti } from '@/context/DrishtiContext';
 import { LinkFlashcard } from './LinkFlashcard';
-import { ToolsTileDeck } from './ToolsTileDeck';
-import { TechRadarCard } from './TechRadarCard';
 import {
   ArrowLeft,
   Plus,
@@ -6722,6 +6631,7 @@ export const MasterTileDetailView: React.FC = () => {
   const tileLinks = links.filter((l) => {
     const matchesTile =
       l.masterTileId === currentTile.id ||
+      (currentTile.id === 'tools') ||
       (currentTile.id === 'ai' && l.category === 'ai') ||
       (currentTile.id === 'life-sutras' && l.category === 'spiritual') ||
       (currentTile.id === 'open-source' && (l.tags?.includes('Open Source') || l.tags?.includes('GitHub'))) ||
@@ -6733,9 +6643,8 @@ export const MasterTileDetailView: React.FC = () => {
       const q = tileSearch.toLowerCase();
       const matchTitle = l.title.toLowerCase().includes(q);
       const matchUrl = l.url.toLowerCase().includes(q);
-      const matchTags = l.tags?.some((t) => t.toLowerCase().includes(q));
       const matchDesc = l.description?.toLowerCase().includes(q);
-      return matchTitle || matchUrl || matchTags || matchDesc;
+      return matchTitle || matchUrl || matchDesc;
     }
 
     return true;
@@ -6787,97 +6696,83 @@ export const MasterTileDetailView: React.FC = () => {
           </button>
         </div>
 
-        {activeTileId !== 'tools' && (
-          <div className="hub-search-bar">
-            <Search size={15} className="hub-search-icon" />
-            <input
-              type="text"
-              placeholder={`Search ${currentTile.title} notes & links...`}
-              value={tileSearch}
-              onChange={(e) => setTileSearch(e.target.value)}
-              className="hub-search-input"
-            />
-            {tileSearch && (
-              <button onClick={() => setTileSearch('')} className="clear-search-btn">
-                ✕
-              </button>
-            )}
+        {/* Local Search inside this Hub */}
+        <div className="hub-search-bar">
+          <Search size={15} className="hub-search-icon" />
+          <input
+            type="text"
+            placeholder={`Search ${currentTile.title}...`}
+            value={tileSearch}
+            onChange={(e) => setTileSearch(e.target.value)}
+            className="hub-search-input"
+          />
+          {tileSearch && (
+            <button onClick={() => setTileSearch('')} className="clear-search-btn">
+              ✕
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Hub Direct Links & Notes Grid */}
+      <div className="hub-resources-section">
+        <div className="section-header-row">
+          <div className="section-title-wrap">
+            <FileText size={16} color={currentTile.colorAccent} />
+            <h3 className="section-title">Documents, Notes & Direct Launchers</h3>
+          </div>
+          <span className="resource-count-badge">
+            {tileLinks.length} {tileLinks.length === 1 ? 'item' : 'items'}
+          </span>
+        </div>
+
+        {tileLinks.length > 0 ? (
+          <div className="resources-grid">
+            {tileLinks.map((link, idx) => (
+              <LinkFlashcard key={link.id} link={link} index={idx} />
+            ))}
+
+            {/* "+ New Item" Quick Tile */}
+            <div
+              className="add-card-placeholder bento-card"
+              onClick={() => {
+                setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
+                setIsAddLinkModalOpen(true);
+              }}
+              role="button"
+              tabIndex={0}
+            >
+              <div className="plus-circle-aura">
+                <Plus size={22} />
+              </div>
+              <span className="add-text">Add New Note / Link</span>
+              <span className="add-subtext">Direct destination URL or Google Doc</span>
+            </div>
+          </div>
+        ) : (
+          <div className="empty-hub-state bento-card">
+            <SearchX size={36} className="empty-icon" />
+            <h3 className="empty-title">
+              {tileSearch ? 'No items match your search' : 'No documents or links added yet'}
+            </h3>
+            <p className="empty-desc">
+              {tileSearch
+                ? `No resources found matching "${tileSearch}".`
+                : `Add your Google Docs, GitHub repos, or direct destination links to ${currentTile.title}.`}
+            </p>
+            <button
+              onClick={() => {
+                setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
+                setIsAddLinkModalOpen(true);
+              }}
+              className="btn-primary empty-add-btn"
+            >
+              <Plus size={15} />
+              <span>Add First Document / Link</span>
+            </button>
           </div>
         )}
       </div>
-
-      {/* Conditional Hub Content */}
-      {activeTileId === 'tools' ? (
-        <ToolsTileDeck />
-      ) : (
-        <>
-          {activeTileId === 'market-updates' && (
-            <div className="market-radar-section">
-              <TechRadarCard />
-            </div>
-          )}
-
-          {/* Hub Direct Links & Notes Grid */}
-          <div className="hub-resources-section">
-            <div className="section-header-row">
-              <div className="section-title-wrap">
-                <FileText size={16} color={currentTile.colorAccent} />
-                <h3 className="section-title">Documents, Notes & Direct Launchers</h3>
-              </div>
-              <span className="resource-count-badge">
-                {tileLinks.length} {tileLinks.length === 1 ? 'item' : 'items'}
-              </span>
-            </div>
-
-            {tileLinks.length > 0 ? (
-              <div className="resources-grid">
-                {tileLinks.map((link, idx) => (
-                  <LinkFlashcard key={link.id} link={link} index={idx} />
-                ))}
-
-                {/* "+ New Item" Quick Tile */}
-                <div
-                  className="add-card-placeholder bento-card"
-                  onClick={() => {
-                    setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
-                    setIsAddLinkModalOpen(true);
-                  }}
-                  role="button"
-                  tabIndex={0}
-                >
-                  <div className="plus-circle-aura">
-                    <Plus size={22} />
-                  </div>
-                  <span className="add-text">Add New Note / Link</span>
-                  <span className="add-subtext">Direct destination URL or Google Doc</span>
-                </div>
-              </div>
-            ) : (
-              <div className="empty-hub-state bento-card">
-                <SearchX size={36} className="empty-icon" />
-                <h3 className="empty-title">
-                  {tileSearch ? 'No items match your search' : 'No documents or links added yet'}
-                </h3>
-                <p className="empty-desc">
-                  {tileSearch
-                    ? `No resources found matching "${tileSearch}".`
-                    : `Add your Google Docs, GitHub repos, or direct destination links to ${currentTile.title}.`}
-                </p>
-                <button
-                  onClick={() => {
-                    setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
-                    setIsAddLinkModalOpen(true);
-                  }}
-                  className="btn-primary empty-add-btn"
-                >
-                  <Plus size={15} />
-                  <span>Add First Document / Link</span>
-                </button>
-              </div>
-            )}
-          </div>
-        </>
-      )}
 
       <style jsx>{`
         .tile-detail-container {
@@ -6994,10 +6889,6 @@ export const MasterTileDetailView: React.FC = () => {
           font-size: 0.8rem;
         }
 
-        .market-radar-section {
-          margin-bottom: 0.5rem;
-        }
-
         .hub-resources-section {
           display: flex;
           flex-direction: column;
@@ -7039,7 +6930,7 @@ export const MasterTileDetailView: React.FC = () => {
         }
 
         .add-card-placeholder {
-          height: 210px;
+          height: 190px;
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -7370,564 +7261,6 @@ export const RecentHistoryCard: React.FC = () => {
 
 
 ================================================================================
-FILE: src/components/TechRadarCard.tsx
-================================================================================
-'use client';
-
-import React, { useState } from 'react';
-import { useDrishti } from '@/context/DrishtiContext';
-import { Radio, ExternalLink, RefreshCw, Zap, TrendingUp, Sparkles } from 'lucide-react';
-
-export const TechRadarCard: React.FC = () => {
-  const { newsItems } = useDrishti();
-  const [activeSourceFilter, setActiveSourceFilter] = useState<string>('All');
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  const sources = ['All', 'ArXiv AI', 'Hacker News', 'Engineering Blog', 'Market Pulse'];
-
-  const filteredNews = newsItems.filter((item) =>
-    activeSourceFilter === 'All' ? true : item.source === activeSourceFilter
-  );
-
-  const handleRefresh = () => {
-    setIsRefreshing(true);
-    setTimeout(() => setIsRefreshing(false), 800);
-  };
-
-  const getSourceBadgeClass = (source: string) => {
-    switch (source) {
-      case 'ArXiv AI':
-        return 'src-arxiv';
-      case 'Hacker News':
-        return 'src-hn';
-      case 'Engineering Blog':
-        return 'src-eng';
-      case 'Market Pulse':
-        return 'src-market';
-      default:
-        return 'src-default';
-    }
-  };
-
-  return (
-    <div className="bento-card tech-radar-container">
-      {/* Header */}
-      <div className="radar-header">
-        <div className="radar-title-group">
-          <div className="radar-icon-box">
-            <Radio size={17} className="radar-icon" />
-          </div>
-          <div>
-            <div className="title-pulse-row">
-              <h3 className="radar-title">Tech & AI Market Radar</h3>
-              <span className="pulse-dot" title="Live RSS Stream" />
-            </div>
-            <p className="radar-subtitle">Ad-free curated engineering pulse & papers</p>
-          </div>
-        </div>
-
-        <button
-          onClick={handleRefresh}
-          className={`btn-icon refresh-btn ${isRefreshing ? 'spinning' : ''}`}
-          title="Refresh RSS Pulse"
-        >
-          <RefreshCw size={14} />
-        </button>
-      </div>
-
-      {/* Filter Chips */}
-      <div className="radar-filters">
-        {sources.map((src) => (
-          <button
-            key={src}
-            onClick={() => setActiveSourceFilter(src)}
-            className={`filter-pill mini-pill ${activeSourceFilter === src ? 'active' : ''}`}
-          >
-            {src}
-          </button>
-        ))}
-      </div>
-
-      {/* Headlines List */}
-      <div className="radar-list">
-        {filteredNews.map((item) => (
-          <a
-            key={item.id}
-            href={item.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="radar-item-row"
-          >
-            <div className="item-meta-row">
-              <span className={`source-badge ${getSourceBadgeClass(item.source)}`}>
-                {item.source}
-              </span>
-              <span className="tag-text">#{item.tag}</span>
-              <span className="time-text">{item.timestamp}</span>
-            </div>
-
-            <h4 className="item-title">{item.title}</h4>
-            <p className="item-summary">{item.summary}</p>
-
-            <div className="item-footer">
-              <span className="read-time">{item.readTime}</span>
-              <span className="open-link-cta">
-                <span>Read Direct</span>
-                <ExternalLink size={12} />
-              </span>
-            </div>
-          </a>
-        ))}
-      </div>
-
-      <style jsx>{`
-        .tech-radar-container {
-          padding: 1.25rem;
-          display: flex;
-          flex-direction: column;
-          gap: 0.85rem;
-          height: 100%;
-        }
-
-        .radar-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-        }
-
-        .radar-title-group {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-        }
-
-        .radar-icon-box {
-          width: 36px;
-          height: 36px;
-          border-radius: 10px;
-          background: rgba(56, 189, 248, 0.15);
-          color: var(--accent-primary);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .title-pulse-row {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-        }
-
-        .radar-title {
-          font-size: 1.05rem;
-          font-weight: 700;
-          color: var(--text-primary);
-        }
-
-        .radar-subtitle {
-          font-size: 0.74rem;
-          color: var(--text-muted);
-        }
-
-        .spinning {
-          animation: spinOnce 0.8s linear infinite;
-        }
-
-        @keyframes spinOnce {
-          from {
-            transform: rotate(0deg);
-          }
-          to {
-            transform: rotate(360deg);
-          }
-        }
-
-        .radar-filters {
-          display: flex;
-          gap: 0.35rem;
-          overflow-x: auto;
-          padding-bottom: 0.25rem;
-        }
-
-        .mini-pill {
-          font-size: 0.72rem;
-          padding: 0.2rem 0.6rem;
-          white-space: nowrap;
-        }
-
-        .radar-list {
-          display: flex;
-          flex-direction: column;
-          gap: 0.65rem;
-          overflow-y: auto;
-          max-height: 360px;
-          padding-right: 0.2rem;
-        }
-
-        .radar-item-row {
-          background: var(--bg-surface-elevated);
-          border: 1px solid var(--border-card);
-          padding: 0.8rem;
-          border-radius: 10px;
-          text-decoration: none;
-          display: flex;
-          flex-direction: column;
-          gap: 0.35rem;
-          transition: var(--transition-smooth);
-        }
-
-        .radar-item-row:hover {
-          border-color: var(--accent-primary);
-          background: var(--bg-glass-card-hover);
-          transform: translateX(3px);
-        }
-
-        .item-meta-row {
-          display: flex;
-          align-items: center;
-          gap: 0.45rem;
-          font-size: 0.68rem;
-        }
-
-        .source-badge {
-          font-weight: 700;
-          padding: 0.12rem 0.45rem;
-          border-radius: 4px;
-          font-size: 0.65rem;
-          text-transform: uppercase;
-        }
-
-        .src-arxiv {
-          background: rgba(168, 85, 247, 0.2);
-          color: #c084fc;
-        }
-
-        .src-hn {
-          background: rgba(249, 115, 22, 0.2);
-          color: #fb923c;
-        }
-
-        .src-eng {
-          background: rgba(59, 130, 246, 0.2);
-          color: #60a5fa;
-        }
-
-        .src-market {
-          background: rgba(16, 185, 129, 0.2);
-          color: #34d399;
-        }
-
-        .tag-text {
-          color: var(--text-muted);
-        }
-
-        .time-text {
-          color: var(--text-muted);
-          margin-left: auto;
-        }
-
-        .item-title {
-          font-size: 0.88rem;
-          font-weight: 600;
-          color: var(--text-primary);
-          line-height: 1.35;
-        }
-
-        .item-summary {
-          font-size: 0.76rem;
-          color: var(--text-secondary);
-          line-height: 1.4;
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
-
-        .item-footer {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding-top: 0.35rem;
-          border-top: 1px solid var(--border-subtle);
-          margin-top: 0.15rem;
-        }
-
-        .read-time {
-          font-size: 0.68rem;
-          color: var(--text-muted);
-        }
-
-        .open-link-cta {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.25rem;
-          font-size: 0.72rem;
-          color: var(--accent-primary);
-          font-weight: 600;
-        }
-      `}</style>
-    </div>
-  );
-};
-
-
-================================================================================
-FILE: src/components/ToolsTileDeck.tsx
-================================================================================
-'use client';
-
-import React from 'react';
-import { useDrishti } from '@/context/DrishtiContext';
-import { LinkFlashcard } from './LinkFlashcard';
-import { LinkCategory } from '@/types';
-import {
-  Compass,
-  Plus,
-  Pin,
-  Sparkles,
-  Layers,
-  SearchX,
-  Share2,
-  Cpu,
-  FolderKanban,
-  Headphones,
-} from 'lucide-react';
-
-const CATEGORIES: { id: LinkCategory; label: string; icon: React.ReactNode }[] = [
-  { id: 'all', label: 'All Tools', icon: <Layers size={14} /> },
-  { id: 'ai', label: 'AI Powerhouse', icon: <Cpu size={14} /> },
-  { id: 'productivity', label: 'Productivity & Docs', icon: <FolderKanban size={14} /> },
-  { id: 'social', label: 'Social & Comms', icon: <Share2 size={14} /> },
-  { id: 'spiritual', label: 'Spiritual Wisdom', icon: <Sparkles size={14} /> },
-  { id: 'media', label: 'Media & Audio', icon: <Headphones size={14} /> },
-];
-
-export const ToolsTileDeck: React.FC = () => {
-  const {
-    links,
-    filteredLinks,
-    activeLinkCategory,
-    setActiveLinkCategory,
-    searchQuery,
-    setIsAddLinkModalOpen,
-    setDefaultModalCategory,
-  } = useDrishti();
-
-  const pinnedCount = links.filter((l) => l.isPinned).length;
-
-  return (
-    <section className="tools-deck-section">
-      {/* Category Filter Bar */}
-      <div className="tools-header-row">
-        <div className="filter-chips-row">
-          {CATEGORIES.map((cat) => {
-            const count =
-              cat.id === 'all'
-                ? links.length
-                : links.filter((l) => l.category === cat.id).length;
-
-            return (
-              <button
-                key={cat.id}
-                onClick={() => setActiveLinkCategory(cat.id)}
-                className={`filter-pill ${activeLinkCategory === cat.id ? 'active' : ''}`}
-              >
-                {cat.icon}
-                <span>{cat.label}</span>
-                <span className="category-count-badge">{count}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        <button
-          onClick={() => {
-            setDefaultModalCategory(activeLinkCategory === 'all' ? 'ai' : activeLinkCategory);
-            setIsAddLinkModalOpen(true);
-          }}
-          className="btn-primary add-link-deck-btn"
-        >
-          <Plus size={14} />
-          <span>Add Tool / Link</span>
-        </button>
-      </div>
-
-      {/* Grid of Link Cards */}
-      {filteredLinks.length > 0 ? (
-        <div className="flashcards-grid">
-          {filteredLinks.map((link, idx) => (
-            <LinkFlashcard key={link.id} link={link} index={idx} />
-          ))}
-
-          {/* "+ New Card" Quick Tile */}
-          <div
-            className="add-card-placeholder bento-card"
-            onClick={() => {
-              setDefaultModalCategory(activeLinkCategory === 'all' ? 'ai' : activeLinkCategory);
-              setIsAddLinkModalOpen(true);
-            }}
-            role="button"
-            tabIndex={0}
-          >
-            <div className="plus-circle-aura">
-              <Plus size={22} />
-            </div>
-            <span className="add-text">Add Deep Link</span>
-            <span className="add-subtext">Direct destination URL</span>
-          </div>
-        </div>
-      ) : (
-        <div className="empty-search-state bento-card">
-          <SearchX size={36} className="empty-icon" />
-          <h3 className="empty-title">No Links Match Your Filter</h3>
-          <p className="empty-desc">
-            {searchQuery
-              ? `No links found matching "${searchQuery}". Try a different keyword.`
-              : 'No links available in this category yet.'}
-          </p>
-          <button
-            onClick={() => setIsAddLinkModalOpen(true)}
-            className="btn-primary empty-add-btn"
-          >
-            <Plus size={15} />
-            <span>Create New Link</span>
-          </button>
-        </div>
-      )}
-
-      <style jsx>{`
-        .tools-deck-section {
-          display: flex;
-          flex-direction: column;
-          gap: 1.25rem;
-        }
-
-        .tools-header-row {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          flex-wrap: wrap;
-          gap: 0.75rem;
-        }
-
-        .filter-chips-row {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          flex-wrap: wrap;
-        }
-
-        .category-count-badge {
-          background: rgba(0, 0, 0, 0.25);
-          font-size: 0.7rem;
-          padding: 0.1rem 0.4rem;
-          border-radius: 999px;
-          margin-left: 0.2rem;
-        }
-
-        .filter-pill.active .category-count-badge {
-          background: rgba(0, 0, 0, 0.4);
-          color: #ffffff;
-        }
-
-        .flashcards-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-          gap: 1.15rem;
-        }
-
-        .add-card-placeholder {
-          height: 205px;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          border: 2px dashed var(--border-card);
-          cursor: pointer;
-          background: transparent;
-          gap: 0.45rem;
-          transition: var(--transition-smooth);
-        }
-
-        .add-card-placeholder:hover {
-          border-color: var(--accent-primary);
-          background: var(--bg-glass-card-hover);
-          transform: translateY(-3px);
-        }
-
-        .plus-circle-aura {
-          width: 42px;
-          height: 42px;
-          border-radius: 50%;
-          background: var(--bg-surface-elevated);
-          border: 1px solid var(--border-card);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: var(--accent-primary);
-          transition: var(--transition-bounce);
-        }
-
-        .add-card-placeholder:hover .plus-circle-aura {
-          background: var(--accent-primary);
-          color: #030712;
-          transform: scale(1.1) rotate(90deg);
-        }
-
-        .add-text {
-          font-size: 0.9rem;
-          font-weight: 700;
-          color: var(--text-primary);
-        }
-
-        .add-subtext {
-          font-size: 0.72rem;
-          color: var(--text-muted);
-        }
-
-        .empty-search-state {
-          padding: 3rem 2rem;
-          text-align: center;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 0.75rem;
-        }
-
-        .empty-icon {
-          color: var(--text-muted);
-          opacity: 0.6;
-        }
-
-        .empty-title {
-          font-size: 1.15rem;
-          font-weight: 700;
-          color: var(--text-primary);
-        }
-
-        .empty-desc {
-          font-size: 0.84rem;
-          color: var(--text-secondary);
-          max-width: 420px;
-        }
-
-        .empty-add-btn {
-          margin-top: 0.5rem;
-        }
-
-        @media (max-width: 640px) {
-          .flashcards-grid {
-            grid-template-columns: 1fr;
-          }
-        }
-      `}</style>
-    </section>
-  );
-};
-
-
-================================================================================
 FILE: src/hooks/useSpeechToText.ts
 ================================================================================
 'use client';
@@ -8162,12 +7495,9 @@ FILE: src/data/initialData.ts
 import {
   MasterTileInfo,
   DeepLinkItem,
-  RevisionFlashcardItem,
-  TechNewsItem,
-  DrishtiSettings,
   CourseTreeNode,
-  ActivityLogItem,
   DailyVoiceEntry,
+  ActivityLogItem,
 } from '@/types';
 
 export const MASTER_TILES: MasterTileInfo[] = [
@@ -8244,8 +7574,10 @@ export const MASTER_TILES: MasterTileInfo[] = [
 ];
 
 export const INITIAL_LINKS: DeepLinkItem[] = [
+  // AI & ML Hub
   {
-    id: 'link-1',
+    id: 'link-ai-1',
+    masterTileId: 'ai',
     title: 'ChatGPT 4o / o1',
     url: 'https://chatgpt.com/',
     category: 'ai',
@@ -8254,14 +7586,13 @@ export const INITIAL_LINKS: DeepLinkItem[] = [
     orderIndex: 0,
     iconType: 'favicon',
     iconValue: 'chatgpt.com',
-    tags: ['LLM', 'AI', 'Coding'],
-    badge: 'AI Core',
-    accentColor: '#10a37f',
+    tags: [],
     clickCount: 25,
     createdAt: '2026-08-11',
   },
   {
-    id: 'link-2',
+    id: 'link-ai-2',
+    masterTileId: 'ai',
     title: 'Google Gemini',
     url: 'https://gemini.google.com/u/0/app',
     category: 'ai',
@@ -8270,14 +7601,13 @@ export const INITIAL_LINKS: DeepLinkItem[] = [
     orderIndex: 1,
     iconType: 'favicon',
     iconValue: 'gemini.google.com',
-    tags: ['Google', 'Multimodal', 'AI'],
-    badge: 'AI Core',
-    accentColor: '#4285f4',
+    tags: [],
     clickCount: 19,
     createdAt: '2026-08-11',
   },
   {
-    id: 'link-3',
+    id: 'link-ai-3',
+    masterTileId: 'ai',
     title: 'Claude AI',
     url: 'https://claude.ai/new',
     category: 'ai',
@@ -8286,14 +7616,331 @@ export const INITIAL_LINKS: DeepLinkItem[] = [
     orderIndex: 2,
     iconType: 'favicon',
     iconValue: 'claude.ai',
-    tags: ['Anthropic', 'Coding', 'Writing'],
-    badge: 'Direct Prompt',
-    accentColor: '#d97706',
+    tags: [],
     clickCount: 22,
     createdAt: '2026-08-11',
   },
   {
-    id: 'link-4',
+    id: 'link-ai-4',
+    masterTileId: 'ai',
+    title: 'Perplexity AI',
+    url: 'https://www.perplexity.ai/',
+    category: 'ai',
+    description: 'AI-assisted deep web research & source-cited answers',
+    isPinned: false,
+    orderIndex: 3,
+    iconType: 'favicon',
+    iconValue: 'perplexity.ai',
+    tags: [],
+    clickCount: 12,
+    createdAt: '2026-08-11',
+  },
+
+  // Coding & DSA Hub
+  {
+    id: 'link-dsa-1',
+    masterTileId: 'coding-dsa',
+    title: 'LeetCode Problem Set',
+    url: 'https://leetcode.com/problemset/',
+    category: 'productivity',
+    description: 'Algorithms, data structures & competitive problem solving',
+    isPinned: true,
+    orderIndex: 0,
+    iconType: 'favicon',
+    iconValue: 'leetcode.com',
+    tags: [],
+    clickCount: 30,
+    createdAt: '2026-08-11',
+  },
+  {
+    id: 'link-dsa-2',
+    masterTileId: 'coding-dsa',
+    title: 'NeetCode 150 Roadmap',
+    url: 'https://neetcode.io/practice',
+    category: 'productivity',
+    description: 'Curated blind 75 & 150 DSA practice questions with video walkthroughs',
+    isPinned: true,
+    orderIndex: 1,
+    iconType: 'favicon',
+    iconValue: 'neetcode.io',
+    tags: [],
+    clickCount: 18,
+    createdAt: '2026-08-11',
+  },
+  {
+    id: 'link-dsa-3',
+    masterTileId: 'coding-dsa',
+    title: 'Codeforces Contests',
+    url: 'https://codeforces.com/contests',
+    category: 'productivity',
+    description: 'Competitive programming rounds & rating gym',
+    isPinned: false,
+    orderIndex: 2,
+    iconType: 'favicon',
+    iconValue: 'codeforces.com',
+    tags: [],
+    clickCount: 10,
+    createdAt: '2026-08-11',
+  },
+
+  // System Design Hub
+  {
+    id: 'link-sys-1',
+    masterTileId: 'system-design',
+    title: 'System Design Primer',
+    url: 'https://github.com/donnemartin/system-design-primer',
+    category: 'productivity',
+    description: 'Comprehensive guide to distributed systems, scalability & LLD/HLD',
+    isPinned: true,
+    orderIndex: 0,
+    iconType: 'favicon',
+    iconValue: 'github.com',
+    tags: [],
+    clickCount: 21,
+    createdAt: '2026-08-11',
+  },
+  {
+    id: 'link-sys-2',
+    masterTileId: 'system-design',
+    title: 'ByteByteGo Architecture Blog',
+    url: 'https://blog.bytebytego.com/',
+    category: 'productivity',
+    description: 'Visual system design deep dives by Alex Xu',
+    isPinned: true,
+    orderIndex: 1,
+    iconType: 'favicon',
+    iconValue: 'bytebytego.com',
+    tags: [],
+    clickCount: 16,
+    createdAt: '2026-08-11',
+  },
+
+  // Recent Update in Market Hub (Clean & Simple)
+  {
+    id: 'link-market-1',
+    masterTileId: 'market-updates',
+    title: 'ArXiv CS & AI Recent Papers',
+    url: 'https://arxiv.org/list/cs.AI/recent',
+    category: 'productivity',
+    description: 'Latest research preprints in artificial intelligence & machine learning',
+    isPinned: true,
+    orderIndex: 0,
+    iconType: 'favicon',
+    iconValue: 'arxiv.org',
+    tags: [],
+    clickCount: 17,
+    createdAt: '2026-08-11',
+  },
+  {
+    id: 'link-market-2',
+    masterTileId: 'market-updates',
+    title: 'Hacker News Frontpage',
+    url: 'https://news.ycombinator.com/',
+    category: 'productivity',
+    description: 'Tech trends, developer launches & engineering discussions',
+    isPinned: true,
+    orderIndex: 1,
+    iconType: 'favicon',
+    iconValue: 'news.ycombinator.com',
+    tags: [],
+    clickCount: 24,
+    createdAt: '2026-08-11',
+  },
+  {
+    id: 'link-market-3',
+    masterTileId: 'market-updates',
+    title: 'OpenAI Research Blog',
+    url: 'https://openai.com/news/research/',
+    category: 'productivity',
+    description: 'Official announcements and technical reports from OpenAI',
+    isPinned: false,
+    orderIndex: 2,
+    iconType: 'favicon',
+    iconValue: 'openai.com',
+    tags: [],
+    clickCount: 12,
+    createdAt: '2026-08-11',
+  },
+
+  // Open Source Hub
+  {
+    id: 'link-os-1',
+    masterTileId: 'open-source',
+    title: 'GitHub Trending Repositories',
+    url: 'https://github.com/trending',
+    category: 'productivity',
+    description: 'Today’s most starred open-source developer repositories',
+    isPinned: true,
+    orderIndex: 0,
+    iconType: 'favicon',
+    iconValue: 'github.com',
+    tags: [],
+    clickCount: 15,
+    createdAt: '2026-08-11',
+  },
+  {
+    id: 'link-os-2',
+    masterTileId: 'open-source',
+    title: 'Good First Issues Finder',
+    url: 'https://goodfirstissues.com/',
+    category: 'productivity',
+    description: 'Curated beginner-friendly open source contribution tickets',
+    isPinned: false,
+    orderIndex: 1,
+    iconType: 'favicon',
+    iconValue: 'goodfirstissues.com',
+    tags: [],
+    clickCount: 8,
+    createdAt: '2026-08-11',
+  },
+
+  // Life Sutras & Wisdom Hub
+  {
+    id: 'link-sutra-1',
+    masterTileId: 'life-sutras',
+    title: 'Vedabase (Bhagavad Gita)',
+    url: 'https://vedabase.io/en/library/bg/',
+    category: 'spiritual',
+    description: 'Complete Sanskrit verses, transliterations, word meanings & purports',
+    isPinned: true,
+    orderIndex: 0,
+    iconType: 'favicon',
+    iconValue: 'vedabase.io',
+    tags: [],
+    clickCount: 28,
+    createdAt: '2026-08-11',
+  },
+  {
+    id: 'link-sutra-2',
+    masterTileId: 'life-sutras',
+    title: 'ISKCON Desire Tree Audio',
+    url: 'https://audio.iskcondesiretree.com/',
+    category: 'spiritual',
+    description: 'Spiritual discourses, kirtans & philosophy lectures',
+    isPinned: true,
+    orderIndex: 1,
+    iconType: 'favicon',
+    iconValue: 'audio.iskcondesiretree.com',
+    tags: [],
+    clickCount: 14,
+    createdAt: '2026-08-11',
+  },
+
+  // Health & Energy Hub
+  {
+    id: 'link-health-1',
+    masterTileId: 'health',
+    title: 'Huberman Lab Protocols',
+    url: 'https://www.hubermanlab.com/topics',
+    category: 'productivity',
+    description: 'Science-based health, sleep optimization & dopamine protocols',
+    isPinned: true,
+    orderIndex: 0,
+    iconType: 'favicon',
+    iconValue: 'hubermanlab.com',
+    tags: [],
+    clickCount: 11,
+    createdAt: '2026-08-11',
+  },
+
+  // Finance & Wealth Hub
+  {
+    id: 'link-fin-1',
+    masterTileId: 'finance',
+    title: 'TradingView Market Charts',
+    url: 'https://www.tradingview.com/',
+    category: 'productivity',
+    description: 'Live stock charts, technical indicators & global markets',
+    isPinned: true,
+    orderIndex: 0,
+    iconType: 'favicon',
+    iconValue: 'tradingview.com',
+    tags: [],
+    clickCount: 13,
+    createdAt: '2026-08-11',
+  },
+
+  // Apply Job & Career Hub
+  {
+    id: 'link-job-1',
+    masterTileId: 'apply-job',
+    title: 'LinkedIn Jobs Portal',
+    url: 'https://www.linkedin.com/jobs/',
+    category: 'social',
+    description: 'Search target companies, recruiter connections & job postings',
+    isPinned: true,
+    orderIndex: 0,
+    iconType: 'favicon',
+    iconValue: 'linkedin.com',
+    tags: [],
+    clickCount: 16,
+    createdAt: '2026-08-11',
+  },
+  {
+    id: 'link-job-2',
+    masterTileId: 'apply-job',
+    title: 'Levels.fyi Software Salaries',
+    url: 'https://www.levels.fyi/',
+    category: 'productivity',
+    description: 'Compensation benchmarks, leveling comparisons & negotiation data',
+    isPinned: false,
+    orderIndex: 1,
+    iconType: 'favicon',
+    iconValue: 'levels.fyi',
+    tags: [],
+    clickCount: 9,
+    createdAt: '2026-08-11',
+  },
+
+  // Tools & Deep Links Hub (Complete core suite)
+  {
+    id: 'link-tool-1',
+    masterTileId: 'tools',
+    title: 'ChatGPT 4o / o1',
+    url: 'https://chatgpt.com/',
+    category: 'ai',
+    description: 'OpenAI reasoning & coding assistant',
+    isPinned: true,
+    orderIndex: 0,
+    iconType: 'favicon',
+    iconValue: 'chatgpt.com',
+    tags: [],
+    clickCount: 25,
+    createdAt: '2026-08-11',
+  },
+  {
+    id: 'link-tool-2',
+    masterTileId: 'tools',
+    title: 'Google Gemini',
+    url: 'https://gemini.google.com/u/0/app',
+    category: 'ai',
+    description: 'Multimodal research, reasoning & 2M context window',
+    isPinned: true,
+    orderIndex: 1,
+    iconType: 'favicon',
+    iconValue: 'gemini.google.com',
+    tags: [],
+    clickCount: 19,
+    createdAt: '2026-08-11',
+  },
+  {
+    id: 'link-tool-3',
+    masterTileId: 'tools',
+    title: 'Claude AI',
+    url: 'https://claude.ai/new',
+    category: 'ai',
+    description: 'Anthropic Claude Sonnet 3.5 - High-precision coding',
+    isPinned: true,
+    orderIndex: 2,
+    iconType: 'favicon',
+    iconValue: 'claude.ai',
+    tags: [],
+    clickCount: 22,
+    createdAt: '2026-08-11',
+  },
+  {
+    id: 'link-tool-4',
+    masterTileId: 'tools',
     title: 'Google Docs Notes',
     url: 'https://docs.google.com/document/u/0/',
     category: 'productivity',
@@ -8302,14 +7949,13 @@ export const INITIAL_LINKS: DeepLinkItem[] = [
     orderIndex: 3,
     iconType: 'favicon',
     iconValue: 'docs.google.com',
-    tags: ['Documents', 'Notes', 'Google Docs'],
-    badge: 'Docs Hub',
-    accentColor: '#4285f4',
+    tags: [],
     clickCount: 14,
     createdAt: '2026-08-11',
   },
   {
-    id: 'link-5',
+    id: 'link-tool-5',
+    masterTileId: 'tools',
     title: 'Gmail Primary Inbox',
     url: 'https://mail.google.com/mail/u/1/#inbox',
     category: 'productivity',
@@ -8318,14 +7964,13 @@ export const INITIAL_LINKS: DeepLinkItem[] = [
     orderIndex: 4,
     iconType: 'favicon',
     iconValue: 'mail.google.com',
-    tags: ['Email', 'Communication', 'Work'],
-    badge: 'Inbox 1',
-    accentColor: '#ea4335',
+    tags: [],
     clickCount: 16,
     createdAt: '2026-08-11',
   },
   {
-    id: 'link-6',
+    id: 'link-tool-6',
+    masterTileId: 'tools',
     title: 'LinkedIn Feed',
     url: 'https://www.linkedin.com/feed/',
     category: 'social',
@@ -8334,14 +7979,13 @@ export const INITIAL_LINKS: DeepLinkItem[] = [
     orderIndex: 5,
     iconType: 'favicon',
     iconValue: 'linkedin.com',
-    tags: ['Professional', 'Network', 'Tech'],
-    badge: 'Direct Feed',
-    accentColor: '#0a66c2',
+    tags: [],
     clickCount: 12,
     createdAt: '2026-08-11',
   },
   {
-    id: 'link-7',
+    id: 'link-tool-7',
+    masterTileId: 'tools',
     title: 'Reddit (Tech & AI)',
     url: 'https://www.reddit.com/',
     category: 'social',
@@ -8350,14 +7994,13 @@ export const INITIAL_LINKS: DeepLinkItem[] = [
     orderIndex: 6,
     iconType: 'favicon',
     iconValue: 'reddit.com',
-    tags: ['Community', 'Discussions', 'ML'],
-    badge: 'Discussions',
-    accentColor: '#ff4500',
+    tags: [],
     clickCount: 8,
     createdAt: '2026-08-11',
   },
   {
-    id: 'link-8',
+    id: 'link-tool-8',
+    masterTileId: 'tools',
     title: 'Vedabase (Wisdom)',
     url: 'https://vedabase.io/en/',
     category: 'spiritual',
@@ -8366,14 +8009,13 @@ export const INITIAL_LINKS: DeepLinkItem[] = [
     orderIndex: 7,
     iconType: 'favicon',
     iconValue: 'vedabase.io',
-    tags: ['Wisdom', 'Philosophy', 'Focus'],
-    badge: 'Sacred Text',
-    accentColor: '#f59e0b',
+    tags: [],
     clickCount: 11,
     createdAt: '2026-08-11',
   },
   {
-    id: 'link-9',
+    id: 'link-tool-9',
+    masterTileId: 'tools',
     title: 'YouTube (Focus)',
     url: 'https://www.youtube.com/',
     category: 'media',
@@ -8382,14 +8024,13 @@ export const INITIAL_LINKS: DeepLinkItem[] = [
     orderIndex: 8,
     iconType: 'favicon',
     iconValue: 'youtube.com',
-    tags: ['Video', 'Learning', 'Media'],
-    badge: 'Video Hub',
-    accentColor: '#ff0000',
+    tags: [],
     clickCount: 9,
     createdAt: '2026-08-11',
   },
   {
-    id: 'link-10',
+    id: 'link-tool-10',
+    masterTileId: 'tools',
     title: 'Spotify Web Player',
     url: 'https://open.spotify.com/',
     category: 'media',
@@ -8398,14 +8039,13 @@ export const INITIAL_LINKS: DeepLinkItem[] = [
     orderIndex: 9,
     iconType: 'favicon',
     iconValue: 'spotify.com',
-    tags: ['Music', 'Focus', 'Audio'],
-    badge: 'Audio',
-    accentColor: '#1db954',
+    tags: [],
     clickCount: 15,
     createdAt: '2026-08-11',
   },
   {
-    id: 'link-11',
+    id: 'link-tool-11',
+    masterTileId: 'tools',
     title: 'ISKCON Desire Tree Audio',
     url: 'https://audio.iskcondesiretree.com/',
     category: 'spiritual',
@@ -8414,14 +8054,13 @@ export const INITIAL_LINKS: DeepLinkItem[] = [
     orderIndex: 10,
     iconType: 'favicon',
     iconValue: 'audio.iskcondesiretree.com',
-    tags: ['Audio', 'Kirtan', 'Discourses'],
-    badge: 'Audio Library',
-    accentColor: '#eab308',
+    tags: [],
     clickCount: 7,
     createdAt: '2026-08-11',
   },
   {
-    id: 'link-12',
+    id: 'link-tool-12',
+    masterTileId: 'tools',
     title: 'Threads',
     url: 'https://www.threads.com/',
     category: 'social',
@@ -8430,14 +8069,13 @@ export const INITIAL_LINKS: DeepLinkItem[] = [
     orderIndex: 11,
     iconType: 'favicon',
     iconValue: 'threads.net',
-    tags: ['Microblog', 'Updates'],
-    badge: 'Stream',
-    accentColor: '#000000',
+    tags: [],
     clickCount: 4,
     createdAt: '2026-08-11',
   },
   {
-    id: 'link-13',
+    id: 'link-tool-13',
+    masterTileId: 'tools',
     title: 'Instagram',
     url: 'https://www.instagram.com/',
     category: 'social',
@@ -8446,14 +8084,13 @@ export const INITIAL_LINKS: DeepLinkItem[] = [
     orderIndex: 12,
     iconType: 'favicon',
     iconValue: 'instagram.com',
-    tags: ['Media', 'Social'],
-    badge: 'Social',
-    accentColor: '#e1306c',
+    tags: [],
     clickCount: 6,
     createdAt: '2026-08-11',
   },
   {
-    id: 'link-14',
+    id: 'link-tool-14',
+    masterTileId: 'tools',
     title: 'Facebook',
     url: 'https://www.facebook.com/',
     category: 'social',
@@ -8462,296 +8099,29 @@ export const INITIAL_LINKS: DeepLinkItem[] = [
     orderIndex: 13,
     iconType: 'favicon',
     iconValue: 'facebook.com',
-    tags: ['Social', 'Groups'],
-    badge: 'Network',
-    accentColor: '#1877f2',
+    tags: [],
     clickCount: 3,
     createdAt: '2026-08-11',
   },
 ];
 
-export const INITIAL_COURSE_TREE_NODES: CourseTreeNode[] = [
-  // 1. AI -> Large Language Models (LLM)
-  {
-    id: 'tree-ai-1',
-    masterTileId: 'ai',
-    subTrack: 'Large Language Models (LLM)',
-    code: '1.',
-    title: 'Transformer Architecture & Self-Attention Mechanics',
-    url: 'https://docs.google.com/document/u/0/',
-    createdAt: '2026-08-11',
-  },
-  {
-    id: 'tree-ai-2',
-    masterTileId: 'ai',
-    subTrack: 'Large Language Models (LLM)',
-    code: '1.1',
-    title: 'Scaled Dot-Product Attention & Multi-Head Projections',
-    url: 'https://docs.google.com/document/u/0/',
-    createdAt: '2026-08-11',
-  },
-  {
-    id: 'tree-ai-3',
-    masterTileId: 'ai',
-    subTrack: 'Large Language Models (LLM)',
-    code: '1.1.1',
-    title: 'Softmax Temperature Scaling by 1/√d_k',
-    url: 'https://docs.google.com/document/u/0/',
-    createdAt: '2026-08-11',
-  },
-  {
-    id: 'tree-ai-4',
-    masterTileId: 'ai',
-    subTrack: 'Large Language Models (LLM)',
-    code: '1.1.2',
-    title: 'Causal Masking for Autoregressive Decoder Generation',
-    url: 'https://docs.google.com/document/u/0/',
-    createdAt: '2026-08-11',
-  },
-  {
-    id: 'tree-ai-5',
-    masterTileId: 'ai',
-    subTrack: 'Large Language Models (LLM)',
-    code: '1.2',
-    title: 'FlashAttention & GPU Hardware Optimizations',
-    url: 'https://docs.google.com/document/u/0/',
-    createdAt: '2026-08-11',
-  },
-  {
-    id: 'tree-ai-6',
-    masterTileId: 'ai',
-    subTrack: 'Large Language Models (LLM)',
-    code: '1.2.1',
-    title: 'Tiling QKV in SRAM to Minimize HBM Memory Bandwidth',
-    url: 'https://docs.google.com/document/u/0/',
-    createdAt: '2026-08-11',
-  },
+export const INITIAL_COURSE_TREE_NODES: CourseTreeNode[] = [];
 
-  // 2. Coding DSA -> Dynamic Programming (DP)
-  {
-    id: 'tree-dsa-1',
-    masterTileId: 'coding-dsa',
-    subTrack: 'Dynamic Programming (DP)',
-    code: '1.',
-    title: '1D DP: State Transitions & Memoization Patterns',
-    url: 'https://docs.google.com/document/u/0/',
-    createdAt: '2026-08-11',
-  },
-  {
-    id: 'tree-dsa-2',
-    masterTileId: 'coding-dsa',
-    subTrack: 'Dynamic Programming (DP)',
-    code: '1.1',
-    title: 'Coin Change & Unbounded Knapsack Formulations',
-    url: 'https://docs.google.com/document/u/0/',
-    createdAt: '2026-08-11',
-  },
-  {
-    id: 'tree-dsa-3',
-    masterTileId: 'coding-dsa',
-    subTrack: 'Dynamic Programming (DP)',
-    code: '1.1.1',
-    title: 'Top-Down Recursion with Cache vs. Bottom-Up Table',
-    url: 'https://docs.google.com/document/u/0/',
-    createdAt: '2026-08-11',
-  },
-  {
-    id: 'tree-dsa-4',
-    masterTileId: 'coding-dsa',
-    subTrack: 'Dynamic Programming (DP)',
-    code: '2.',
-    title: '2D & Grid DP: Longest Common Subsequence (LCS)',
-    url: 'https://docs.google.com/document/u/0/',
-    createdAt: '2026-08-11',
-  },
+export const INITIAL_DAILY_VOICE_NOTES: DailyVoiceEntry[] = [];
 
-  // 3. System Design -> High Level Design (HLD)
-  {
-    id: 'tree-sys-1',
-    masterTileId: 'system-design',
-    subTrack: 'High Level Design (HLD)',
-    code: '1.',
-    title: 'Distributed Storage & Partitioning Strategies',
-    url: 'https://docs.google.com/document/u/0/',
-    createdAt: '2026-08-11',
-  },
-  {
-    id: 'tree-sys-2',
-    masterTileId: 'system-design',
-    subTrack: 'High Level Design (HLD)',
-    code: '1.1',
-    title: 'Consistent Hashing & Virtual Nodes Balancing',
-    url: 'https://docs.google.com/document/u/0/',
-    createdAt: '2026-08-11',
-  },
-  {
-    id: 'tree-sys-3',
-    masterTileId: 'system-design',
-    subTrack: 'High Level Design (HLD)',
-    code: '1.2',
-    title: 'CAP Theorem, Quorum Consensus & Raft Elections',
-    url: 'https://docs.google.com/document/u/0/',
-    createdAt: '2026-08-11',
-  },
+export const INITIAL_ACTIVITY_LOGS: ActivityLogItem[] = [];
 
-  // 4. Life Sutras -> Vedic Sutras & Bhagavad Gita
-  {
-    id: 'tree-sutra-1',
-    masterTileId: 'life-sutras',
-    subTrack: 'Vedic Sutras & Bhagavad Gita',
-    code: '1.',
-    title: 'Karma Yoga: Action Without Attachment (BG 2.47)',
-    url: 'https://vedabase.io/en/library/bg/2/47/',
-    createdAt: '2026-08-11',
-  },
-  {
-    id: 'tree-sutra-2',
-    masterTileId: 'life-sutras',
-    subTrack: 'Vedic Sutras & Bhagavad Gita',
-    code: '1.1',
-    title: 'Controlling the Restless Mind via Abhyasa & Vairagya (BG 6.35)',
-    url: 'https://vedabase.io/en/library/bg/6/35/',
-    createdAt: '2026-08-11',
-  },
-];
+export const INITIAL_REVISION_CARDS: any[] = [];
 
-export const INITIAL_REVISION_CARDS: RevisionFlashcardItem[] = [
-  {
-    id: 'rev-1',
-    masterTileId: 'ai',
-    category: 'AI & Deep Learning',
-    question: 'How does Scaled Dot-Product Attention work, and why scale by √d_k?',
-    difficulty: 'Intermediate',
-    hint: 'Think about variance of dot products when vector dimension grows large.',
-    tags: ['Transformer', 'Attention', 'Softmax'],
-    answerSummary: 'Attention(Q, K, V) = softmax(Q K^T / √d_k) V',
-    answerMarkdown: `### Scaled Dot-Product Attention\n\n$$\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{Q K^T}{\\sqrt{d_k}}\\right) V$$\n\nDividing by $\\sqrt{d_k}$ normalizes variance to 1, preventing the softmax function from saturating into regions with vanishing gradients.`,
-    keyTakeaways: ['Variance scaling stabilizes gradients', 'O(N^2 * d) complexity'],
-    masteryStatus: 'reviewing',
-    reviewCount: 4,
-    createdAt: '2026-08-11',
-  },
-  {
-    id: 'rev-2',
-    masterTileId: 'system-design',
-    category: 'System Design',
-    question: 'Explain Consistent Hashing and how it handles cluster additions/removals.',
-    difficulty: 'Advanced',
-    hint: '360° hash ring with virtual nodes.',
-    tags: ['Distributed Systems', 'Caching', 'DynamoDB'],
-    answerSummary: 'Maps nodes and keys to a 360° ring. Resizing only relocates K/N keys.',
-    answerMarkdown: `### Consistent Hashing\n\nTraditional modulo ($hash \\% N$) remaps almost 100% of keys on server resize. Consistent hashing maps both nodes and keys to a continuous $2^{32}-1$ ring, minimizing remapping to only $K/N$ items.`,
-    keyTakeaways: ['Virtual nodes prevent hot-spot skew', 'Used by DynamoDB, Cassandra, Akamai'],
-    masteryStatus: 'learning',
-    reviewCount: 2,
-    createdAt: '2026-08-11',
-  },
-  {
-    id: 'rev-3',
-    masterTileId: 'coding-dsa',
-    category: 'DSA & Algorithms',
-    question: 'How does LRU (Least Recently Used) Cache achieve O(1) Get and Put operations?',
-    difficulty: 'Intermediate',
-    hint: 'Combine Doubly Linked List with Hash Map.',
-    tags: ['Data Structures', 'Caching', 'Hash Map'],
-    answerSummary: 'Doubly Linked List tracks access order; Hash Map provides O(1) node lookup.',
-    answerMarkdown: `### LRU Cache Design\n\n1. **Hash Map**: \`key -> Node\` for $O(1)$ random access.\n2. **Doubly Linked List**: Head stores most recently used, tail stores eviction candidate. Moving any node to head is $O(1)$.`,
-    keyTakeaways: ['Strict O(1) get and put', 'Sentinel head and tail simplify edge cases'],
-    masteryStatus: 'mastered',
-    reviewCount: 6,
-    createdAt: '2026-08-11',
-  },
-];
+export const INITIAL_TECH_NEWS: any[] = [];
 
-export const INITIAL_TECH_NEWS: TechNewsItem[] = [
-  {
-    id: 'news-1',
-    source: 'ArXiv AI',
-    title: 'DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning',
-    summary: 'Demonstrating pure RL self-evolution for complex mathematical & algorithmic reasoning without supervised fine-tuning.',
-    url: 'https://arxiv.org/abs/2501.12948',
-    tag: 'Reinforcement Learning',
-    timestamp: '2h ago',
-    readTime: '6 min read',
-    impactScore: 98,
-  },
-  {
-    id: 'news-2',
-    source: 'Hacker News',
-    title: 'FlashAttention-3: Fast and Accurate Attention with Asynchrony and FP8 on GPUs',
-    summary: 'Hardware-aware attention exploitation on Hopper architectures achieving up to 1.2 PFLOPs/s throughput.',
-    url: 'https://github.com/Dao-AILab/flash-attention',
-    tag: 'GPU Architecture',
-    timestamp: '4h ago',
-    readTime: '8 min read',
-    impactScore: 94,
-  },
-  {
-    id: 'news-3',
-    source: 'Engineering Blog',
-    title: 'Next.js 15 Server Actions, Turbopack, and Dynamic IO Architecture',
-    summary: 'Deep architectural dive into zero-client-waterfall data fetching and partial prerendering paradigms.',
-    url: 'https://nextjs.org/blog',
-    tag: 'Web Performance',
-    timestamp: '7h ago',
-    readTime: '5 min read',
-    impactScore: 89,
-  },
-  {
-    id: 'news-4',
-    source: 'Market Pulse',
-    title: 'PyTorch 2.5 + TorchDynamo Compiler Benchmarks on Modern CUDA 12.4',
-    summary: 'Over 28% latency reduction in transformer training loops with fused kernel graph capture.',
-    url: 'https://pytorch.org/blog/',
-    tag: 'PyTorch',
-    timestamp: '11h ago',
-    readTime: '4 min read',
-    impactScore: 86,
-  },
-];
-
-export const INITIAL_ACTIVITY_LOGS: ActivityLogItem[] = [
-  {
-    id: 'act-1',
-    title: 'ChatGPT 4o / o1',
-    url: 'https://chatgpt.com/',
-    category: 'Tools',
-    type: 'link',
-    timestamp: '2026-08-11T20:15:00.000Z',
-    dateStr: '2026-08-11',
-    timeStr: '20:15:00',
-  },
-  {
-    id: 'act-2',
-    title: '1.1 Scaled Dot-Product Attention & Multi-Head Projections',
-    url: 'https://docs.google.com/document/u/0/',
-    category: 'AI & Machine Learning',
-    type: 'doc_tree',
-    timestamp: '2026-08-11T20:20:00.000Z',
-    dateStr: '2026-08-11',
-    timeStr: '20:20:00',
-  },
-  {
-    id: 'act-3',
-    title: 'Scaled Dot-Product Attention Flashcard',
-    url: '#flashcard-rev-1',
-    category: 'AI & Machine Learning',
-    type: 'flashcard',
-    timestamp: '2026-08-11T20:28:00.000Z',
-    dateStr: '2026-08-11',
-    timeStr: '20:28:00',
-  },
-];
-
-export const INITIAL_SETTINGS: DrishtiSettings = {
-  theme: 'obsidian',
+export const INITIAL_SETTINGS = {
+  theme: 'obsidian' as const,
   uiScale: 100,
+  isCompactMode: false,
   enable3DTilt: true,
   enableAnimations: true,
   dailyGoalFocusMinutes: 120,
 };
-
-export const INITIAL_DAILY_VOICE_NOTES: DailyVoiceEntry[] = [];
-
 
 

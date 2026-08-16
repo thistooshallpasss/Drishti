@@ -33,3 +33,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+plan.txt
+snapshot.txt
+step.txt
+reset_database.sql
+supabase_schema.sql
+snapshot.py

@@ -181,7 +181,6 @@ Activity Summary:
                     {log.type.replace('_', ' ')}
                   </span>
                   <span className="log-time">{log.timeStr || log.dateStr}</span>
-                  <span className="log-category-pill">{log.category}</span>
                 </div>
 
                 <div className="log-center-title" title={log.url}>

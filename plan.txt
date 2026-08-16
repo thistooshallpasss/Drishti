@@ -92,5 +92,3 @@ npm run dev
 Open **[http://localhost:3000](http://localhost:3000)** in your browser.
 
 
-i want to add this feature of downloading notes in activity tracker section i will have log of my activites on net and notes of my recorded things both seperately but at one place i want to add this feature that for each activity or note i can download that as a text file with the title and the note content .
-
