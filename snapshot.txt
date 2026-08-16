@@ -1,6 +1,6 @@
 ================================================================================
 DRISHTI (दृष्टि) - COMPLETE CODEBASE SNAPSHOT
-Generated on: 2026-08-16 21:04:48
+Generated on: 2026-08-16 21:15:39
 Total files captured: 30
 ================================================================================
 
@@ -1242,18 +1242,33 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const logActivity = (title: string, url: string, category: string, type: 'link' | 'doc_tree' | 'flashcard') => {
     const now = new Date();
+    const uniqueSuffix = Math.random().toString(36).substring(2, 9);
     const newLog: ActivityLogItem = {
-      id: `act-${Date.now()}`, title, url, category, type,
+      id: `act-${Date.now()}-${uniqueSuffix}`,
+      title,
+      url,
+      category,
+      type,
       timestamp: now.toISOString(),
       dateStr: now.toISOString().split('T')[0],
       timeStr: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
     };
     setActivityLogs((prev) => filter60DayLogs([newLog, ...prev]));
     if (supabase && isSupabaseConfigured()) {
-      supabase.from('drishti_activity_logs').insert({
-        id: newLog.id, title: newLog.title, url: newLog.url, category: newLog.category,
-        type: newLog.type, timestamp: newLog.timestamp, date_str: newLog.dateStr, time_str: newLog.timeStr,
-      }).then(({ error }) => { if (error) { console.error('[Supabase Log Insert Error]', error); setSyncError(`Failed to log activity: ${error.message}`); } });
+      supabase.from('drishti_activity_logs').upsert({
+        id: newLog.id,
+        title: newLog.title,
+        url: newLog.url,
+        category: newLog.category,
+        type: newLog.type,
+        timestamp: newLog.timestamp,
+        date_str: newLog.dateStr,
+        time_str: newLog.timeStr,
+      }).then(({ error }) => {
+        if (error) {
+          console.warn('[Supabase Log Upsert Warning]', error.message);
+        }
+      });
     }
   };
 
@@ -1532,6 +1547,8 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     URL.revokeObjectURL(url);
   };
 
+  const lastAppendedTranscriptRef = useRef<{ text: string; time: number }>({ text: '', time: 0 });
+
   // Daily Voice Journal & Dictation Methods (14-day rolling retention)
   const appendVoiceNote = useCallback(
     (transcript: string) => {
@@ -1539,6 +1556,15 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (!clean) return;
 
       const now = new Date();
+      if (
+        lastAppendedTranscriptRef.current.text === clean &&
+        now.getTime() - lastAppendedTranscriptRef.current.time < 3000
+      ) {
+        // Guard against duplicate echoes in the same 3-second window
+        return;
+      }
+      lastAppendedTranscriptRef.current = { text: clean, time: now.getTime() };
+
       const todayDateKey = now.toISOString().split('T')[0];
       const heading = now.toLocaleDateString('en-US', {
         weekday: 'long',
@@ -3770,13 +3796,7 @@ export const DailyVoiceNotesCard: React.FC = () => {
     startListening,
     stopListening,
     resetTranscript,
-  } = useSpeechToText({
-    onFinalTranscript: (finalText) => {
-      if (finalText.trim()) {
-        appendVoiceNote(finalText);
-      }
-    },
-  });
+  } = useSpeechToText();
 
   const todayKey = new Date().toISOString().split('T')[0];
   const activeDayKey = selectedDayKey || todayKey;
@@ -3793,13 +3813,13 @@ export const DailyVoiceNotesCard: React.FC = () => {
 
   const handleToggleListening = () => {
     if (isListening) {
-      // Stopping: will append recorded transcript
-      const textToAppend = transcript.trim() || interimTranscript.trim();
+      // Stopping: will append recorded transcript exactly once
+      const textToAppend = (transcript.trim() + (interimTranscript ? ` ${interimTranscript.trim()}` : '')).trim();
       stopListening();
       if (textToAppend) {
         appendVoiceNote(textToAppend);
-        resetTranscript();
       }
+      resetTranscript();
     } else {
       resetTranscript();
       startListening();
@@ -6673,13 +6693,13 @@ FILE: src/components/MasterTileDetailView.tsx
 import React, { useState } from 'react';
 import { useDrishti } from '@/context/DrishtiContext';
 import { LinkFlashcard } from './LinkFlashcard';
+import { ToolsTileDeck } from './ToolsTileDeck';
 import { TechRadarCard } from './TechRadarCard';
 import {
   ArrowLeft,
   Plus,
   Search,
   SearchX,
-  Compass,
   FileText,
 } from 'lucide-react';
 
@@ -6699,11 +6719,9 @@ export const MasterTileDetailView: React.FC = () => {
   if (!currentTile) return null;
 
   // Filter links belonging to this tile
-  // Match either explicit masterTileId OR tile id matching link category
   const tileLinks = links.filter((l) => {
     const matchesTile =
       l.masterTileId === currentTile.id ||
-      (currentTile.id === 'tools' && l.category !== undefined) ||
       (currentTile.id === 'ai' && l.category === 'ai') ||
       (currentTile.id === 'life-sutras' && l.category === 'spiritual') ||
       (currentTile.id === 'open-source' && (l.tags?.includes('Open Source') || l.tags?.includes('GitHub'))) ||
@@ -6769,90 +6787,97 @@ export const MasterTileDetailView: React.FC = () => {
           </button>
         </div>
 
-        {/* Local Search inside this Hub */}
-        <div className="hub-search-bar">
-          <Search size={15} className="hub-search-icon" />
-          <input
-            type="text"
-            placeholder={`Search ${currentTile.title} notes & links...`}
-            value={tileSearch}
-            onChange={(e) => setTileSearch(e.target.value)}
-            className="hub-search-input"
-          />
-          {tileSearch && (
-            <button onClick={() => setTileSearch('')} className="clear-search-btn">
-              ✕
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Conditional Hub Content */}
-      {activeTileId === 'market-updates' && (
-        <div className="market-radar-section">
-          <TechRadarCard />
-        </div>
-      )}
-
-      {/* Hub Direct Links & Notes Grid */}
-      <div className="hub-resources-section">
-        <div className="section-header-row">
-          <div className="section-title-wrap">
-            <FileText size={16} color={currentTile.colorAccent} />
-            <h3 className="section-title">Documents, Notes & Direct Launchers</h3>
-          </div>
-          <span className="resource-count-badge">
-            {tileLinks.length} {tileLinks.length === 1 ? 'item' : 'items'}
-          </span>
-        </div>
-
-        {tileLinks.length > 0 ? (
-          <div className="resources-grid">
-            {tileLinks.map((link, idx) => (
-              <LinkFlashcard key={link.id} link={link} index={idx} />
-            ))}
-
-            {/* "+ New Item" Quick Tile */}
-            <div
-              className="add-card-placeholder bento-card"
-              onClick={() => {
-                setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
-                setIsAddLinkModalOpen(true);
-              }}
-              role="button"
-              tabIndex={0}
-            >
-              <div className="plus-circle-aura">
-                <Plus size={22} />
-              </div>
-              <span className="add-text">Add New Note / Link</span>
-              <span className="add-subtext">Direct destination URL or Google Doc</span>
-            </div>
-          </div>
-        ) : (
-          <div className="empty-hub-state bento-card">
-            <SearchX size={36} className="empty-icon" />
-            <h3 className="empty-title">
-              {tileSearch ? 'No items match your search' : 'No documents or links added yet'}
-            </h3>
-            <p className="empty-desc">
-              {tileSearch
-                ? `No resources found matching "${tileSearch}".`
-                : `Add your Google Docs, GitHub repos, or direct destination links to ${currentTile.title}.`}
-            </p>
-            <button
-              onClick={() => {
-                setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
-                setIsAddLinkModalOpen(true);
-              }}
-              className="btn-primary empty-add-btn"
-            >
-              <Plus size={15} />
-              <span>Add First Document / Link</span>
-            </button>
+        {activeTileId !== 'tools' && (
+          <div className="hub-search-bar">
+            <Search size={15} className="hub-search-icon" />
+            <input
+              type="text"
+              placeholder={`Search ${currentTile.title} notes & links...`}
+              value={tileSearch}
+              onChange={(e) => setTileSearch(e.target.value)}
+              className="hub-search-input"
+            />
+            {tileSearch && (
+              <button onClick={() => setTileSearch('')} className="clear-search-btn">
+                ✕
+              </button>
+            )}
           </div>
         )}
       </div>
+
+      {/* Conditional Hub Content */}
+      {activeTileId === 'tools' ? (
+        <ToolsTileDeck />
+      ) : (
+        <>
+          {activeTileId === 'market-updates' && (
+            <div className="market-radar-section">
+              <TechRadarCard />
+            </div>
+          )}
+
+          {/* Hub Direct Links & Notes Grid */}
+          <div className="hub-resources-section">
+            <div className="section-header-row">
+              <div className="section-title-wrap">
+                <FileText size={16} color={currentTile.colorAccent} />
+                <h3 className="section-title">Documents, Notes & Direct Launchers</h3>
+              </div>
+              <span className="resource-count-badge">
+                {tileLinks.length} {tileLinks.length === 1 ? 'item' : 'items'}
+              </span>
+            </div>
+
+            {tileLinks.length > 0 ? (
+              <div className="resources-grid">
+                {tileLinks.map((link, idx) => (
+                  <LinkFlashcard key={link.id} link={link} index={idx} />
+                ))}
+
+                {/* "+ New Item" Quick Tile */}
+                <div
+                  className="add-card-placeholder bento-card"
+                  onClick={() => {
+                    setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
+                    setIsAddLinkModalOpen(true);
+                  }}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <div className="plus-circle-aura">
+                    <Plus size={22} />
+                  </div>
+                  <span className="add-text">Add New Note / Link</span>
+                  <span className="add-subtext">Direct destination URL or Google Doc</span>
+                </div>
+              </div>
+            ) : (
+              <div className="empty-hub-state bento-card">
+                <SearchX size={36} className="empty-icon" />
+                <h3 className="empty-title">
+                  {tileSearch ? 'No items match your search' : 'No documents or links added yet'}
+                </h3>
+                <p className="empty-desc">
+                  {tileSearch
+                    ? `No resources found matching "${tileSearch}".`
+                    : `Add your Google Docs, GitHub repos, or direct destination links to ${currentTile.title}.`}
+                </p>
+                <button
+                  onClick={() => {
+                    setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
+                    setIsAddLinkModalOpen(true);
+                  }}
+                  className="btn-primary empty-add-btn"
+                >
+                  <Plus size={15} />
+                  <span>Add First Document / Link</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
       <style jsx>{`
         .tile-detail-container {
@@ -8064,12 +8089,6 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}) {
       recognitionRef.current.stop();
     } catch (e) {}
     setIsListening(false);
-
-    // If there is any recognized final transcript, trigger callback
-    const totalRecorded = finalTranscriptRef.current.trim();
-    if (totalRecorded && onFinalCallbackRef.current) {
-      onFinalCallbackRef.current(totalRecorded);
-    }
   }, []);
 
   const resetTranscript = useCallback(() => {

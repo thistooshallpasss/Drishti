@@ -493,18 +493,33 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const logActivity = (title: string, url: string, category: string, type: 'link' | 'doc_tree' | 'flashcard') => {
     const now = new Date();
+    const uniqueSuffix = Math.random().toString(36).substring(2, 9);
     const newLog: ActivityLogItem = {
-      id: `act-${Date.now()}`, title, url, category, type,
+      id: `act-${Date.now()}-${uniqueSuffix}`,
+      title,
+      url,
+      category,
+      type,
       timestamp: now.toISOString(),
       dateStr: now.toISOString().split('T')[0],
       timeStr: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
     };
     setActivityLogs((prev) => filter60DayLogs([newLog, ...prev]));
     if (supabase && isSupabaseConfigured()) {
-      supabase.from('drishti_activity_logs').insert({
-        id: newLog.id, title: newLog.title, url: newLog.url, category: newLog.category,
-        type: newLog.type, timestamp: newLog.timestamp, date_str: newLog.dateStr, time_str: newLog.timeStr,
-      }).then(({ error }) => { if (error) { console.error('[Supabase Log Insert Error]', error); setSyncError(`Failed to log activity: ${error.message}`); } });
+      supabase.from('drishti_activity_logs').upsert({
+        id: newLog.id,
+        title: newLog.title,
+        url: newLog.url,
+        category: newLog.category,
+        type: newLog.type,
+        timestamp: newLog.timestamp,
+        date_str: newLog.dateStr,
+        time_str: newLog.timeStr,
+      }).then(({ error }) => {
+        if (error) {
+          console.warn('[Supabase Log Upsert Warning]', error.message);
+        }
+      });
     }
   };
 
@@ -783,6 +798,8 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     URL.revokeObjectURL(url);
   };
 
+  const lastAppendedTranscriptRef = useRef<{ text: string; time: number }>({ text: '', time: 0 });
+
   // Daily Voice Journal & Dictation Methods (14-day rolling retention)
   const appendVoiceNote = useCallback(
     (transcript: string) => {
@@ -790,6 +807,15 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (!clean) return;
 
       const now = new Date();
+      if (
+        lastAppendedTranscriptRef.current.text === clean &&
+        now.getTime() - lastAppendedTranscriptRef.current.time < 3000
+      ) {
+        // Guard against duplicate echoes in the same 3-second window
+        return;
+      }
+      lastAppendedTranscriptRef.current = { text: clean, time: now.getTime() };
+
       const todayDateKey = now.toISOString().split('T')[0];
       const heading = now.toLocaleDateString('en-US', {
         weekday: 'long',

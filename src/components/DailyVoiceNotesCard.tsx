@@ -52,13 +52,7 @@ export const DailyVoiceNotesCard: React.FC = () => {
     startListening,
     stopListening,
     resetTranscript,
-  } = useSpeechToText({
-    onFinalTranscript: (finalText) => {
-      if (finalText.trim()) {
-        appendVoiceNote(finalText);
-      }
-    },
-  });
+  } = useSpeechToText();
 
   const todayKey = new Date().toISOString().split('T')[0];
   const activeDayKey = selectedDayKey || todayKey;
@@ -75,13 +69,13 @@ export const DailyVoiceNotesCard: React.FC = () => {
 
   const handleToggleListening = () => {
     if (isListening) {
-      // Stopping: will append recorded transcript
-      const textToAppend = transcript.trim() || interimTranscript.trim();
+      // Stopping: will append recorded transcript exactly once
+      const textToAppend = (transcript.trim() + (interimTranscript ? ` ${interimTranscript.trim()}` : '')).trim();
       stopListening();
       if (textToAppend) {
         appendVoiceNote(textToAppend);
-        resetTranscript();
       }
+      resetTranscript();
     } else {
       resetTranscript();
       startListening();

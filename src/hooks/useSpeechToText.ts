@@ -157,12 +157,6 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}) {
       recognitionRef.current.stop();
     } catch (e) {}
     setIsListening(false);
-
-    // If there is any recognized final transcript, trigger callback
-    const totalRecorded = finalTranscriptRef.current.trim();
-    if (totalRecorded && onFinalCallbackRef.current) {
-      onFinalCallbackRef.current(totalRecorded);
-    }
   }, []);
 
   const resetTranscript = useCallback(() => {

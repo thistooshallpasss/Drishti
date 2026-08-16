@@ -3,13 +3,13 @@
 import React, { useState } from 'react';
 import { useDrishti } from '@/context/DrishtiContext';
 import { LinkFlashcard } from './LinkFlashcard';
+import { ToolsTileDeck } from './ToolsTileDeck';
 import { TechRadarCard } from './TechRadarCard';
 import {
   ArrowLeft,
   Plus,
   Search,
   SearchX,
-  Compass,
   FileText,
 } from 'lucide-react';
 
@@ -29,11 +29,9 @@ export const MasterTileDetailView: React.FC = () => {
   if (!currentTile) return null;
 
   // Filter links belonging to this tile
-  // Match either explicit masterTileId OR tile id matching link category
   const tileLinks = links.filter((l) => {
     const matchesTile =
       l.masterTileId === currentTile.id ||
-      (currentTile.id === 'tools' && l.category !== undefined) ||
       (currentTile.id === 'ai' && l.category === 'ai') ||
       (currentTile.id === 'life-sutras' && l.category === 'spiritual') ||
       (currentTile.id === 'open-source' && (l.tags?.includes('Open Source') || l.tags?.includes('GitHub'))) ||
@@ -99,90 +97,97 @@ export const MasterTileDetailView: React.FC = () => {
           </button>
         </div>
 
-        {/* Local Search inside this Hub */}
-        <div className="hub-search-bar">
-          <Search size={15} className="hub-search-icon" />
-          <input
-            type="text"
-            placeholder={`Search ${currentTile.title} notes & links...`}
-            value={tileSearch}
-            onChange={(e) => setTileSearch(e.target.value)}
-            className="hub-search-input"
-          />
-          {tileSearch && (
-            <button onClick={() => setTileSearch('')} className="clear-search-btn">
-              ✕
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Conditional Hub Content */}
-      {activeTileId === 'market-updates' && (
-        <div className="market-radar-section">
-          <TechRadarCard />
-        </div>
-      )}
-
-      {/* Hub Direct Links & Notes Grid */}
-      <div className="hub-resources-section">
-        <div className="section-header-row">
-          <div className="section-title-wrap">
-            <FileText size={16} color={currentTile.colorAccent} />
-            <h3 className="section-title">Documents, Notes & Direct Launchers</h3>
-          </div>
-          <span className="resource-count-badge">
-            {tileLinks.length} {tileLinks.length === 1 ? 'item' : 'items'}
-          </span>
-        </div>
-
-        {tileLinks.length > 0 ? (
-          <div className="resources-grid">
-            {tileLinks.map((link, idx) => (
-              <LinkFlashcard key={link.id} link={link} index={idx} />
-            ))}
-
-            {/* "+ New Item" Quick Tile */}
-            <div
-              className="add-card-placeholder bento-card"
-              onClick={() => {
-                setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
-                setIsAddLinkModalOpen(true);
-              }}
-              role="button"
-              tabIndex={0}
-            >
-              <div className="plus-circle-aura">
-                <Plus size={22} />
-              </div>
-              <span className="add-text">Add New Note / Link</span>
-              <span className="add-subtext">Direct destination URL or Google Doc</span>
-            </div>
-          </div>
-        ) : (
-          <div className="empty-hub-state bento-card">
-            <SearchX size={36} className="empty-icon" />
-            <h3 className="empty-title">
-              {tileSearch ? 'No items match your search' : 'No documents or links added yet'}
-            </h3>
-            <p className="empty-desc">
-              {tileSearch
-                ? `No resources found matching "${tileSearch}".`
-                : `Add your Google Docs, GitHub repos, or direct destination links to ${currentTile.title}.`}
-            </p>
-            <button
-              onClick={() => {
-                setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
-                setIsAddLinkModalOpen(true);
-              }}
-              className="btn-primary empty-add-btn"
-            >
-              <Plus size={15} />
-              <span>Add First Document / Link</span>
-            </button>
+        {activeTileId !== 'tools' && (
+          <div className="hub-search-bar">
+            <Search size={15} className="hub-search-icon" />
+            <input
+              type="text"
+              placeholder={`Search ${currentTile.title} notes & links...`}
+              value={tileSearch}
+              onChange={(e) => setTileSearch(e.target.value)}
+              className="hub-search-input"
+            />
+            {tileSearch && (
+              <button onClick={() => setTileSearch('')} className="clear-search-btn">
+                ✕
+              </button>
+            )}
           </div>
         )}
       </div>
+
+      {/* Conditional Hub Content */}
+      {activeTileId === 'tools' ? (
+        <ToolsTileDeck />
+      ) : (
+        <>
+          {activeTileId === 'market-updates' && (
+            <div className="market-radar-section">
+              <TechRadarCard />
+            </div>
+          )}
+
+          {/* Hub Direct Links & Notes Grid */}
+          <div className="hub-resources-section">
+            <div className="section-header-row">
+              <div className="section-title-wrap">
+                <FileText size={16} color={currentTile.colorAccent} />
+                <h3 className="section-title">Documents, Notes & Direct Launchers</h3>
+              </div>
+              <span className="resource-count-badge">
+                {tileLinks.length} {tileLinks.length === 1 ? 'item' : 'items'}
+              </span>
+            </div>
+
+            {tileLinks.length > 0 ? (
+              <div className="resources-grid">
+                {tileLinks.map((link, idx) => (
+                  <LinkFlashcard key={link.id} link={link} index={idx} />
+                ))}
+
+                {/* "+ New Item" Quick Tile */}
+                <div
+                  className="add-card-placeholder bento-card"
+                  onClick={() => {
+                    setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
+                    setIsAddLinkModalOpen(true);
+                  }}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <div className="plus-circle-aura">
+                    <Plus size={22} />
+                  </div>
+                  <span className="add-text">Add New Note / Link</span>
+                  <span className="add-subtext">Direct destination URL or Google Doc</span>
+                </div>
+              </div>
+            ) : (
+              <div className="empty-hub-state bento-card">
+                <SearchX size={36} className="empty-icon" />
+                <h3 className="empty-title">
+                  {tileSearch ? 'No items match your search' : 'No documents or links added yet'}
+                </h3>
+                <p className="empty-desc">
+                  {tileSearch
+                    ? `No resources found matching "${tileSearch}".`
+                    : `Add your Google Docs, GitHub repos, or direct destination links to ${currentTile.title}.`}
+                </p>
+                <button
+                  onClick={() => {
+                    setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
+                    setIsAddLinkModalOpen(true);
+                  }}
+                  className="btn-primary empty-add-btn"
+                >
+                  <Plus size={15} />
+                  <span>Add First Document / Link</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
       <style jsx>{`
         .tile-detail-container {
