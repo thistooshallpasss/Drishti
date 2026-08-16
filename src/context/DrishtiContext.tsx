@@ -13,6 +13,7 @@ import {
   RevisionCategory,
   CourseTreeNode,
   ActivityLogItem,
+  DailyVoiceEntry,
 } from '@/types';
 import {
   MASTER_TILES,
@@ -22,6 +23,7 @@ import {
   INITIAL_SETTINGS,
   INITIAL_COURSE_TREE_NODES,
   INITIAL_ACTIVITY_LOGS,
+  INITIAL_DAILY_VOICE_NOTES,
 } from '@/data/initialData';
 import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 
@@ -76,6 +78,15 @@ interface DrishtiContextType {
   flushScratchpadToCloud: (content: string) => void;
   scratchpadLanguage: string;
   setScratchpadLanguage: (lang: string) => void;
+  dailyVoiceNotes: DailyVoiceEntry[];
+  todayVoiceEntry: DailyVoiceEntry | null;
+  appendVoiceNote: (transcript: string) => void;
+  updateDailyVoiceNote: (id: string, newContent: string) => void;
+  deleteDailyVoiceNote: (id: string) => void;
+  downloadVoiceNoteFile: (dateKey: string) => void;
+  exportAllVoiceNotes: () => void;
+  isVoiceDictationModalOpen: boolean;
+  setIsVoiceDictationModalOpen: (open: boolean) => void;
   settings: DrishtiSettings;
   setTheme: (theme: ThemeMode) => void;
   setUiScale: (scale: number) => void;
@@ -103,6 +114,7 @@ const STORAGE_KEY_LOGS = 'drishti_logs_v5';
 const STORAGE_KEY_SETTINGS = 'drishti_settings_v5';
 const STORAGE_KEY_SCRATCHPAD = 'drishti_scratchpad_v5';
 const STORAGE_KEY_CUSTOM_SUBTRACKS = 'drishti_custom_subtracks_v5';
+const STORAGE_KEY_VOICE_NOTES = 'drishti_voice_notes_v5';
 const ECHO_GUARD_TTL_MS = 3000;
 
 export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -150,22 +162,31 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [editingLink, setEditingLink] = useState<DeepLinkItem | null>(null);
   const [isAddRevisionModalOpen, setIsAddRevisionModalOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isVoiceDictationModalOpen, setIsVoiceDictationModalOpen] = useState(false);
+  const [dailyVoiceNotes, setDailyVoiceNotes] = useState<DailyVoiceEntry[]>(INITIAL_DAILY_VOICE_NOTES);
+
+  // 14-Day (2-Week) Rolling Retention Filter - Automatically purges entries older than 14 days
+  const filter14DayVoiceNotes = useCallback((rawNotes: DailyVoiceEntry[]): DailyVoiceEntry[] => {
+    const now = new Date().getTime();
+    const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
+    return (rawNotes || []).filter((note) => {
+      if (!note || !note.dateKey) return false;
+      const noteTime = new Date(note.dateKey).getTime();
+      return (now - noteTime) <= fourteenDaysMs;
+    });
+  }, []);
+
+  const todayKey = new Date().toISOString().split('T')[0];
+  const todayVoiceEntry = useMemo(() => {
+    return dailyVoiceNotes.find((entry) => entry.dateKey === todayKey) || null;
+  }, [dailyVoiceNotes, todayKey]);
 
   const getSubTracksForTile = useCallback(
     (tileId: MasterTileId): string[] => {
-      const baseTile = MASTER_TILES.find((t) => t.id === tileId);
-      const baseTracks = baseTile ? baseTile.subTracks : [];
       const custom = customSubTracks[tileId] || [];
-      const fromTree = treeNodes
-        .filter((n) => n.masterTileId === tileId && n.subTrack && n.subTrack.trim() !== '')
-        .map((n) => n.subTrack.trim());
-      const uniqueSet = new Set<string>();
-      baseTracks.forEach((t) => uniqueSet.add(t));
-      custom.forEach((t) => uniqueSet.add(t));
-      fromTree.forEach((t) => uniqueSet.add(t));
-      return Array.from(uniqueSet);
+      return custom;
     },
-    [customSubTracks, treeNodes]
+    [customSubTracks]
   );
 
   const addCustomSubTrack = useCallback((tileId: MasterTileId, name: string) => {
@@ -298,11 +319,13 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (savedScratch) setScratchpadContentState(savedScratch);
         const savedSubTracks = localStorage.getItem(STORAGE_KEY_CUSTOM_SUBTRACKS);
         if (savedSubTracks) setCustomSubTracks(JSON.parse(savedSubTracks));
+        const savedVoice = localStorage.getItem(STORAGE_KEY_VOICE_NOTES);
+        if (savedVoice) setDailyVoiceNotes(filter14DayVoiceNotes(JSON.parse(savedVoice)));
       } catch (e) { console.warn('Local storage read error', e); }
       await fetchFromCloud();
     };
     initData();
-  }, [filter60DayLogs, fetchFromCloud]);
+  }, [filter60DayLogs, filter14DayVoiceNotes, fetchFromCloud]);
 
   useEffect(() => {
     if (!supabase || !isSupabaseConfigured()) return;
@@ -458,6 +481,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } catch (e) {}
   }, [settings]);
   useEffect(() => { try { localStorage.setItem(STORAGE_KEY_SCRATCHPAD, scratchpadContent); } catch (e) {} }, [scratchpadContent]);
+  useEffect(() => { try { localStorage.setItem(STORAGE_KEY_VOICE_NOTES, JSON.stringify(dailyVoiceNotes)); } catch (e) {} }, [dailyVoiceNotes]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -759,8 +783,140 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     URL.revokeObjectURL(url);
   };
 
+  // Daily Voice Journal & Dictation Methods (14-day rolling retention)
+  const appendVoiceNote = useCallback(
+    (transcript: string) => {
+      const clean = transcript.trim();
+      if (!clean) return;
+
+      const now = new Date();
+      const todayDateKey = now.toISOString().split('T')[0];
+      const heading = now.toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const newBlock = `### 🎙️ [${timeStr}]\n${clean}`;
+
+      setDailyVoiceNotes((prev) => {
+        const valid = filter14DayVoiceNotes(prev);
+        const existingIndex = valid.findIndex((n) => n.dateKey === todayDateKey);
+        let updated: DailyVoiceEntry[];
+
+        if (existingIndex >= 0) {
+          const existing = valid[existingIndex];
+          const updatedEntry: DailyVoiceEntry = {
+            ...existing,
+            content: `${existing.content}\n\n${newBlock}`,
+            sessionsCount: (existing.sessionsCount || 1) + 1,
+            updatedAt: now.toISOString(),
+          };
+          updated = [
+            ...valid.slice(0, existingIndex),
+            updatedEntry,
+            ...valid.slice(existingIndex + 1),
+          ];
+        } else {
+          const newEntry: DailyVoiceEntry = {
+            id: `voice-${todayDateKey}`,
+            dateKey: todayDateKey,
+            fullDateHeading: heading,
+            content: `# ${heading}\n\n${newBlock}`,
+            sessionsCount: 1,
+            createdAt: now.toISOString(),
+            updatedAt: now.toISOString(),
+          };
+          updated = [newEntry, ...valid];
+        }
+
+        try {
+          localStorage.setItem(STORAGE_KEY_VOICE_NOTES, JSON.stringify(updated));
+        } catch (e) {}
+
+        return updated;
+      });
+
+      logActivity(`Voice note recorded for ${heading}`, '#voice-journal', 'Audio Dictation', 'link');
+    },
+    [filter14DayVoiceNotes]
+  );
+
+  const updateDailyVoiceNote = useCallback((id: string, newContent: string) => {
+    setDailyVoiceNotes((prev) => {
+      const updated = prev.map((entry) =>
+        entry.id === id
+          ? { ...entry, content: newContent, updatedAt: new Date().toISOString() }
+          : entry
+      );
+      try {
+        localStorage.setItem(STORAGE_KEY_VOICE_NOTES, JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  }, []);
+
+  const deleteDailyVoiceNote = useCallback((id: string) => {
+    setDailyVoiceNotes((prev) => {
+      const updated = prev.filter((entry) => entry.id !== id);
+      try {
+        localStorage.setItem(STORAGE_KEY_VOICE_NOTES, JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  }, []);
+
+  const downloadVoiceNoteFile = useCallback(
+    (dateKey: string) => {
+      const entry = dailyVoiceNotes.find((n) => n.dateKey === dateKey);
+      if (!entry) return;
+
+      const headerMeta = `=======================================================\nDRISHTI (दृष्टि) - DAILY VOICE NOTES & DICTATION LOG\nDate: ${entry.fullDateHeading}\nSessions: ${entry.sessionsCount}\nUpdated: ${new Date(entry.updatedAt).toLocaleTimeString()}\n=======================================================\n\n`;
+      const fileBody = headerMeta + entry.content;
+
+      const blob = new Blob([fileBody], { type: 'text/plain;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Drishti_VoiceNotes_${dateKey}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    [dailyVoiceNotes]
+  );
+
+  const exportAllVoiceNotes = useCallback(() => {
+    if (dailyVoiceNotes.length === 0) return;
+
+    let combined = `=======================================================\nDRISHTI (दृष्टि) - COMPLETE 14-DAY VOICE JOURNAL ARCHIVE\nExported: ${new Date().toLocaleString()}\nTotal Days: ${dailyVoiceNotes.length}\nAuto-Purge Window: 14 Days (2 Weeks)\n=======================================================\n\n`;
+
+    for (const entry of dailyVoiceNotes) {
+      combined += `\n#######################################################\n# ${entry.fullDateHeading} (${entry.sessionsCount} sessions)\n#######################################################\n\n${entry.content}\n\n`;
+    }
+
+    const blob = new Blob([combined], { type: 'text/plain;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Drishti_All_VoiceNotes_14Days_${new Date().toISOString().split('T')[0]}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [dailyVoiceNotes]);
+
   const exportDataJson = () => {
-    const backupData = { version: '5.0', exportedAt: new Date().toISOString(), links, treeNodes, revisionCards, activityLogs, settings, scratchpadContent, customSubTracks };
+    const backupData = {
+      version: '5.0',
+      exportedAt: new Date().toISOString(),
+      links,
+      treeNodes,
+      revisionCards,
+      activityLogs,
+      settings,
+      scratchpadContent,
+      customSubTracks,
+      dailyVoiceNotes,
+    };
     const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -777,6 +933,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setActivityLogs(INITIAL_ACTIVITY_LOGS);
     setSettings(INITIAL_SETTINGS);
     setCustomSubTracks({});
+    setDailyVoiceNotes(INITIAL_DAILY_VOICE_NOTES);
     if (supabase && isSupabaseConfigured()) {
       try {
         await Promise.all([
@@ -809,6 +966,9 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
         activityLogs, logActivity, recentOpenedHistory, exportLogs,
         newsItems, scratchpadContent, setScratchpadContent, flushScratchpadToCloud,
         scratchpadLanguage, setScratchpadLanguage,
+        dailyVoiceNotes, todayVoiceEntry, appendVoiceNote, updateDailyVoiceNote,
+        deleteDailyVoiceNote, downloadVoiceNoteFile, exportAllVoiceNotes,
+        isVoiceDictationModalOpen, setIsVoiceDictationModalOpen,
         settings, setTheme, setUiScale, updateSettings,
         isAddLinkModalOpen, setIsAddLinkModalOpen,
         defaultModalCategory, setDefaultModalCategory,

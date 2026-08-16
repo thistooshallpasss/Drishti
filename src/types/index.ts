@@ -17,13 +17,13 @@ export interface MasterTileInfo {
   subtitle: string;
   iconName: string;
   colorAccent: string;
-  subTracks: string[];
 }
 
 export type LinkCategory = 'all' | 'social' | 'productivity' | 'ai' | 'media' | 'spiritual' | 'custom';
 
 export interface DeepLinkItem {
   id: string;
+  masterTileId?: MasterTileId;
   title: string;
   url: string;
   category: LinkCategory;
@@ -99,6 +99,16 @@ export interface TechNewsItem {
   timestamp: string;
   readTime: string;
   impactScore: number;
+}
+
+export interface DailyVoiceEntry {
+  id: string; // e.g. "voice-2026-08-16"
+  dateKey: string; // "YYYY-MM-DD"
+  fullDateHeading: string; // e.g. "Sunday, 16 August 2026"
+  content: string; // Aggregated notes for the day
+  sessionsCount: number; // Number of dictation sessions that day
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type ThemeMode = 'obsidian' | 'midnight' | 'cyber' | 'sunset' | 'paper';

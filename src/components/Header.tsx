@@ -7,12 +7,10 @@ import {
   Search,
   Sliders,
   Palette,
-  Download,
-  RotateCcw,
-  Zap,
   Check,
   Cloud,
   CloudOff,
+  Mic,
 } from 'lucide-react';
 
 const THEMES: { id: ThemeMode; name: string; iconColor: string; bgPreview: string }[] = [
@@ -37,12 +35,9 @@ export const Header: React.FC = () => {
     setTheme,
     setUiScale,
     setIsCommandPaletteOpen,
-    exportDataJson,
-    resetToDefaults,
   } = useDrishti();
 
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCloudInfoOpen, setIsCloudInfoOpen] = useState(false);
 
   return (
@@ -207,47 +202,22 @@ export const Header: React.FC = () => {
             <span className="scale-badge">{settings.uiScale}%</span>
           </div>
 
-          {/* Quick Settings & Backup */}
-          <div className="relative-dropdown">
-            <button
-              onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-              className="btn-icon settings-btn"
-              title="Backup, Export & Options"
-            >
-              <Zap size={17} />
-            </button>
-
-            {isSettingsOpen && (
-              <div className="dropdown-menu settings-menu">
-                <div className="dropdown-header">
-                  <Sliders size={14} />
-                  <span>Command Center Controls</span>
-                </div>
-                <button
-                  onClick={() => {
-                    exportDataJson();
-                    setIsSettingsOpen(false);
-                  }}
-                  className="settings-option"
-                >
-                  <Download size={15} />
-                  <span>Export Master Backup (JSON)</span>
-                </button>
-                <button
-                  onClick={() => {
-                    if (confirm('Reset all 10 tiles, trees, and flashcards to default Drishti state?')) {
-                      resetToDefaults();
-                      setIsSettingsOpen(false);
-                    }
-                  }}
-                  className="settings-option reset-option"
-                >
-                  <RotateCcw size={15} />
-                  <span>Reset to Defaults</span>
-                </button>
-              </div>
-            )}
-          </div>
+          {/* Quick Voice Journal & Dictation Trigger */}
+          <button
+            onClick={() => {
+              setActiveTileId(null);
+              setTimeout(() => {
+                const section = document.getElementById('daily-voice-journal-section');
+                if (section) {
+                  section.scrollIntoView({ behavior: 'smooth' });
+                }
+              }, 50);
+            }}
+            className="btn-icon voice-btn"
+            title="Daily Voice Journal & Audio Dictation"
+          >
+            <Mic size={17} />
+          </button>
         </div>
       </div>
 
@@ -448,6 +418,12 @@ export const Header: React.FC = () => {
         .settings-option:hover {
           background: var(--bg-surface-elevated);
           color: var(--accent-primary);
+        }
+
+        .voice-btn:hover {
+          color: #c084fc !important;
+          border-color: rgba(168, 85, 247, 0.4) !important;
+          background: rgba(168, 85, 247, 0.12) !important;
         }
 
         .theme-option.active {

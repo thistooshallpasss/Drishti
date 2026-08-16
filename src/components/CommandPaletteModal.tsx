@@ -5,13 +5,11 @@ import { useDrishti } from '@/context/DrishtiContext';
 import {
   Search,
   ExternalLink,
-  BookOpen,
-  Palette,
   Plus,
   Compass,
-  X,
+  Mic,
   ArrowRight,
-  Layers,
+  FolderKanban,
 } from 'lucide-react';
 
 export const CommandPaletteModal: React.FC = () => {
@@ -19,10 +17,9 @@ export const CommandPaletteModal: React.FC = () => {
     isCommandPaletteOpen,
     setIsCommandPaletteOpen,
     links,
-    revisionCards,
-    setTheme,
+    masterTiles,
+    setActiveTileId,
     setIsAddLinkModalOpen,
-    setIsAddRevisionModalOpen,
     recordLinkClick,
   } = useDrishti();
 
@@ -42,14 +39,14 @@ export const CommandPaletteModal: React.FC = () => {
     (l) =>
       l.title.toLowerCase().includes(query.toLowerCase()) ||
       l.url.toLowerCase().includes(query.toLowerCase()) ||
-      l.tags.some((t) => t.toLowerCase().includes(query.toLowerCase()))
+      l.tags?.some((t) => t.toLowerCase().includes(query.toLowerCase())) ||
+      l.description?.toLowerCase().includes(query.toLowerCase())
   );
 
-  const filteredRev = revisionCards.filter(
-    (r) =>
-      r.question.toLowerCase().includes(query.toLowerCase()) ||
-      r.category.toLowerCase().includes(query.toLowerCase()) ||
-      r.tags.some((t) => t.toLowerCase().includes(query.toLowerCase()))
+  const filteredHubs = masterTiles.filter(
+    (h) =>
+      h.title.toLowerCase().includes(query.toLowerCase()) ||
+      h.subtitle.toLowerCase().includes(query.toLowerCase())
   );
 
   return (
@@ -60,7 +57,7 @@ export const CommandPaletteModal: React.FC = () => {
           <Search size={18} className="search-icon" />
           <input
             type="text"
-            placeholder="Type a command, search deep-links, or find revision topics..."
+            placeholder="Type a command, search links, docs, or jump to any hub..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="palette-input"
@@ -84,33 +81,62 @@ export const CommandPaletteModal: React.FC = () => {
               }}
             >
               <Plus size={15} className="item-icon-cyan" />
-              <span>Add New Deep Link</span>
+              <span>Add New Link / Google Doc</span>
               <span className="item-badge">Action</span>
             </div>
+
             <div
               className="palette-item"
               onClick={() => {
                 handleClose();
-                setIsAddRevisionModalOpen(true);
+                setActiveTileId(null);
+                setTimeout(() => {
+                  const el = document.getElementById('daily-voice-journal-section');
+                  if (el) el.scrollIntoView({ behavior: 'smooth' });
+                }, 50);
               }}
             >
-              <BookOpen size={15} className="item-icon-purple" />
-              <span>Create SDE / AI Flashcard</span>
-              <span className="item-badge">Action</span>
+              <Mic size={15} className="item-icon-purple" />
+              <span>Open Daily Voice Journal & Dictation</span>
+              <span className="item-badge">Voice</span>
             </div>
           </div>
 
-          {/* Matching Links */}
+          {/* Matching Master Hubs */}
+          {filteredHubs.length > 0 && (
+            <div className="section-group">
+              <span className="section-label">FOCUS & LEARNING HUBS</span>
+              {filteredHubs.slice(0, 4).map((hub) => (
+                <div
+                  key={hub.id}
+                  className="palette-item"
+                  onClick={() => {
+                    setActiveTileId(hub.id);
+                    handleClose();
+                  }}
+                >
+                  <FolderKanban size={15} style={{ color: hub.colorAccent }} />
+                  <div className="item-text-group">
+                    <span className="item-title">{hub.title}</span>
+                    <span className="item-sub">{hub.subtitle}</span>
+                  </div>
+                  <ArrowRight size={13} className="ext-icon" />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Matching Links & Documents */}
           {filteredLinks.length > 0 && (
             <div className="section-group">
-              <span className="section-label">DIRECT DEEP LINKS</span>
-              {filteredLinks.slice(0, 6).map((link) => (
+              <span className="section-label">DIRECT DEEP LINKS & DOCS</span>
+              {filteredLinks.slice(0, 8).map((link) => (
                 <div
                   key={link.id}
                   className="palette-item"
                   onClick={() => {
                     recordLinkClick(link.id);
-                    window.open(link.url, '_blank');
+                    window.open(link.url, '_blank', 'noopener,noreferrer');
                     handleClose();
                   }}
                 >
@@ -120,29 +146,6 @@ export const CommandPaletteModal: React.FC = () => {
                     <span className="item-sub">{link.url}</span>
                   </div>
                   <ExternalLink size={13} className="ext-icon" />
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Matching Revision Cards */}
-          {filteredRev.length > 0 && (
-            <div className="section-group">
-              <span className="section-label">REVISION FLASHCARDS</span>
-              {filteredRev.slice(0, 4).map((card) => (
-                <div
-                  key={card.id}
-                  className="palette-item"
-                  onClick={() => {
-                    handleClose();
-                  }}
-                >
-                  <BookOpen size={15} className="item-icon-amber" />
-                  <div className="item-text-group">
-                    <span className="item-title">{card.question}</span>
-                    <span className="item-sub">[{card.category}] • {card.difficulty}</span>
-                  </div>
-                  <ArrowRight size={13} className="ext-icon" />
                 </div>
               ))}
             </div>
@@ -250,15 +253,11 @@ export const CommandPaletteModal: React.FC = () => {
         }
 
         .item-icon-purple {
-          color: var(--accent-tertiary);
+          color: #c084fc;
         }
 
         .item-icon-blue {
           color: #60a5fa;
-        }
-
-        .item-icon-amber {
-          color: #f59e0b;
         }
 
         .item-badge {

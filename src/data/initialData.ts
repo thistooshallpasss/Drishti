@@ -6,6 +6,7 @@ import {
   DrishtiSettings,
   CourseTreeNode,
   ActivityLogItem,
+  DailyVoiceEntry,
 } from '@/types';
 
 export const MASTER_TILES: MasterTileInfo[] = [
@@ -15,7 +16,6 @@ export const MASTER_TILES: MasterTileInfo[] = [
     subtitle: 'ML, Deep Learning, Computer Vision, LLMs, Math & RAG',
     iconName: 'Cpu',
     colorAccent: '#a855f7',
-    subTracks: ['Large Language Models (LLM)', 'Deep Learning (DL)', 'Machine Learning (ML)', 'Computer Vision (CV)', 'RAG & AI Agents', 'Math for AI'],
   },
   {
     id: 'coding-dsa',
@@ -23,7 +23,6 @@ export const MASTER_TILES: MasterTileInfo[] = [
     subtitle: 'Data structures, graph algorithms, dynamic programming & problem solving',
     iconName: 'Code2',
     colorAccent: '#38bdf8',
-    subTracks: ['Dynamic Programming (DP)', 'Graphs & BFS/DFS', 'Trees & Binary Search Trees', 'Arrays & Two Pointers', 'Linked Lists & Stacks', 'Heaps & Tries'],
   },
   {
     id: 'system-design',
@@ -31,7 +30,6 @@ export const MASTER_TILES: MasterTileInfo[] = [
     subtitle: 'LLD, HLD, distributed architectures & production case studies',
     iconName: 'Server',
     colorAccent: '#60a5fa',
-    subTracks: ['High Level Design (HLD)', 'Low Level Design (LLD / OOD)', 'Distributed Systems & Caching', 'Architecture Case Studies (Uber, WhatsApp)'],
   },
   {
     id: 'market-updates',
@@ -39,7 +37,6 @@ export const MASTER_TILES: MasterTileInfo[] = [
     subtitle: 'Real-time AI research papers, engineering blogs & tech pulses',
     iconName: 'TrendingUp',
     colorAccent: '#f97316',
-    subTracks: ['ArXiv AI Papers', 'Engineering Blogs (OpenAI, Anthropic, Google)', 'Hacker News Top Tech', 'Market Trends'],
   },
   {
     id: 'open-source',
@@ -47,7 +44,6 @@ export const MASTER_TILES: MasterTileInfo[] = [
     subtitle: 'GitHub projects, PR tracking, framework architecture & contributions',
     iconName: 'GitBranch',
     colorAccent: '#34d399',
-    subTracks: ['Trending AI Repos', 'My PRs & Contributions', 'Framework Source Code Deep Dives', 'Good First Issues'],
   },
   {
     id: 'life-sutras',
@@ -55,7 +51,6 @@ export const MASTER_TILES: MasterTileInfo[] = [
     subtitle: 'Bhagavad Gita reflections, timeless principles & daily life notes',
     iconName: 'Sparkles',
     colorAccent: '#fbbf24',
-    subTracks: ['Vedic Sutras & Bhagavad Gita', 'Daily Core Principles', 'Mindset & Focus Quotes', 'Personal Mantras'],
   },
   {
     id: 'health',
@@ -63,7 +58,6 @@ export const MASTER_TILES: MasterTileInfo[] = [
     subtitle: 'Workout protocols, nutrition, sleep optimization & mental clarity',
     iconName: 'HeartPulse',
     colorAccent: '#f43f5e',
-    subTracks: ['Strength & Workout Protocols', 'Sleep & Circadian Rhythm', 'Nutrition & Supplements', 'Daily Energy Log'],
   },
   {
     id: 'finance',
@@ -71,7 +65,6 @@ export const MASTER_TILES: MasterTileInfo[] = [
     subtitle: 'Investments, expense tracking, market watchlist & financial plans',
     iconName: 'BadgeDollarSign',
     colorAccent: '#10b981',
-    subTracks: ['Investment Portfolio', 'Monthly Expense Ledger', 'Market Watchlist', 'Long-Term Financial Goals'],
   },
   {
     id: 'apply-job',
@@ -79,7 +72,6 @@ export const MASTER_TILES: MasterTileInfo[] = [
     subtitle: 'Job application pipeline, resume versions & interview preparation',
     iconName: 'Briefcase',
     colorAccent: '#818cf8',
-    subTracks: ['Target Companies Pipeline', 'Resume & Cover Letter Versions', 'Interview Q&A Log', 'Referrals & Outreach'],
   },
   {
     id: 'tools',
@@ -87,7 +79,6 @@ export const MASTER_TILES: MasterTileInfo[] = [
     subtitle: 'Distraction-free deep links to AI tools, docs, social & audio',
     iconName: 'Compass',
     colorAccent: '#38bdf8',
-    subTracks: ['AI Powerhouse', 'Productivity & Docs', 'Social & Comms', 'Media & Audio'],
   },
 ];
 
@@ -598,3 +589,6 @@ export const INITIAL_SETTINGS: DrishtiSettings = {
   enableAnimations: true,
   dailyGoalFocusMinutes: 120,
 };
+
+export const INITIAL_DAILY_VOICE_NOTES: DailyVoiceEntry[] = [];
+

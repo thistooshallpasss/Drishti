@@ -2,19 +2,15 @@
 
 import React, { useState } from 'react';
 import { useDrishti } from '@/context/DrishtiContext';
-import { CourseDocTree } from './CourseDocTree';
-import { ToolsTileDeck } from './ToolsTileDeck';
-import { RevisionFlashcardDeck } from './RevisionFlashcardDeck';
+import { LinkFlashcard } from './LinkFlashcard';
 import { TechRadarCard } from './TechRadarCard';
-import { ScratchpadCard } from './ScratchpadCard';
-import { WisdomFocusCard } from './WisdomFocusCard';
 import {
-  Plus,
   ArrowLeft,
-  Layers,
-  X,
-  Check,
-  FolderPlus,
+  Plus,
+  Search,
+  SearchX,
+  Compass,
+  FileText,
 } from 'lucide-react';
 
 export const MasterTileDetailView: React.FC = () => {
@@ -22,27 +18,47 @@ export const MasterTileDetailView: React.FC = () => {
     masterTiles,
     activeTileId,
     setActiveTileId,
-    activeSubTrack,
-    setActiveSubTrack,
-    getSubTracksForTile,
-    addCustomSubTrack,
-    deleteCustomSubTrack,
+    links,
+    setIsAddLinkModalOpen,
+    setDefaultModalCategory,
   } = useDrishti();
 
-  const [isAddingTrack, setIsAddingTrack] = useState(false);
-  const [newTrackName, setNewTrackName] = useState('');
+  const [tileSearch, setTileSearch] = useState('');
 
   const currentTile = masterTiles.find((t) => t.id === activeTileId);
   if (!currentTile) return null;
 
-  const currentSubTracks = getSubTracksForTile(currentTile.id);
+  // Filter links belonging to this tile
+  // Match either explicit masterTileId OR tile id matching link category
+  const tileLinks = links.filter((l) => {
+    const matchesTile =
+      l.masterTileId === currentTile.id ||
+      (currentTile.id === 'tools' && l.category !== undefined) ||
+      (currentTile.id === 'ai' && l.category === 'ai') ||
+      (currentTile.id === 'life-sutras' && l.category === 'spiritual') ||
+      (currentTile.id === 'open-source' && (l.tags?.includes('Open Source') || l.tags?.includes('GitHub'))) ||
+      (currentTile.id === 'apply-job' && (l.category === 'social' || l.tags?.includes('Career')));
 
-  const handleCreateSubTrack = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newTrackName.trim()) {
-      addCustomSubTrack(currentTile.id, newTrackName.trim());
-      setNewTrackName('');
-      setIsAddingTrack(false);
+    if (!matchesTile) return false;
+
+    if (tileSearch.trim()) {
+      const q = tileSearch.toLowerCase();
+      const matchTitle = l.title.toLowerCase().includes(q);
+      const matchUrl = l.url.toLowerCase().includes(q);
+      const matchTags = l.tags?.some((t) => t.toLowerCase().includes(q));
+      const matchDesc = l.description?.toLowerCase().includes(q);
+      return matchTitle || matchUrl || matchTags || matchDesc;
+    }
+
+    return true;
+  });
+
+  const getCategoryForTile = (tileId: string) => {
+    switch (tileId) {
+      case 'ai': return 'ai';
+      case 'life-sutras': return 'spiritual';
+      case 'tools': return 'productivity';
+      default: return 'productivity';
     }
   };
 
@@ -61,129 +77,112 @@ export const MasterTileDetailView: React.FC = () => {
 
         <span className="breadcrumb-sep">/</span>
         <span className="breadcrumb-current-tile">{currentTile.title}</span>
-
-        {activeTileId !== 'tools' && activeTileId !== 'market-updates' && (
-          <>
-            <span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-subtrack">{activeSubTrack}</span>
-          </>
-        )}
       </div>
 
       {/* Hub Hero Banner */}
       <div className="hub-hero-banner bento-card">
-        <div className="hero-content">
-          <h2 className="hero-title">{currentTile.title}</h2>
-          <p className="hero-subtitle">{currentTile.subtitle}</p>
+        <div className="hero-top-row">
+          <div className="hero-content">
+            <h2 className="hero-title">{currentTile.title}</h2>
+            <p className="hero-subtitle">{currentTile.subtitle}</p>
+          </div>
+
+          <button
+            onClick={() => {
+              setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
+              setIsAddLinkModalOpen(true);
+            }}
+            className="btn-primary add-doc-btn"
+          >
+            <Plus size={15} />
+            <span>Add Link / Document</span>
+          </button>
         </div>
 
-        {/* Dynamic Subtrack Switcher Pills */}
-        {activeTileId !== 'tools' && (
-          <div className="subtracks-bar">
-            {currentSubTracks.map((track) => {
-              const isActive = activeSubTrack === track;
-              const isDefaultTrack = currentTile.subTracks.includes(track);
-
-              return (
-                <div key={track} className="track-pill-wrapper">
-                  <button
-                    onClick={() => setActiveSubTrack(track)}
-                    className={`filter-pill track-pill ${isActive ? 'active' : ''}`}
-                  >
-                    <Layers size={13} />
-                    <span>{track}</span>
-                  </button>
-
-                  {!isDefaultTrack && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (confirm(`Delete custom sub-track "${track}" and its notes?`)) {
-                          deleteCustomSubTrack(currentTile.id, track);
-                        }
-                      }}
-                      className="track-delete-btn"
-                      title={`Delete sub-track ${track}`}
-                    >
-                      <X size={11} />
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-
-            {isAddingTrack ? (
-              <form onSubmit={handleCreateSubTrack} className="inline-add-track-form">
-                <input
-                  type="text"
-                  placeholder="Sub-track name (e.g. Bangalore)..."
-                  value={newTrackName}
-                  onChange={(e) => setNewTrackName(e.target.value)}
-                  autoFocus
-                  className="add-track-input"
-                />
-                <button type="submit" className="add-track-submit-btn" title="Add Track">
-                  <Check size={13} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsAddingTrack(false);
-                    setNewTrackName('');
-                  }}
-                  className="add-track-cancel-btn"
-                  title="Cancel"
-                >
-                  <X size={13} />
-                </button>
-              </form>
-            ) : (
-              <button
-                onClick={() => setIsAddingTrack(true)}
-                className="filter-pill add-track-pill"
-                title="Create a new custom tab / sub-track"
-              >
-                <Plus size={13} />
-                <span>New Sub-Track</span>
-              </button>
-            )}
-          </div>
-        )}
+        {/* Local Search inside this Hub */}
+        <div className="hub-search-bar">
+          <Search size={15} className="hub-search-icon" />
+          <input
+            type="text"
+            placeholder={`Search ${currentTile.title} notes & links...`}
+            value={tileSearch}
+            onChange={(e) => setTileSearch(e.target.value)}
+            className="hub-search-input"
+          />
+          {tileSearch && (
+            <button onClick={() => setTileSearch('')} className="clear-search-btn">
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Conditional Hub Content */}
-      {activeTileId === 'tools' ? (
-        /* Tools Deep Link Deck */
-        <div className="hub-body-section">
-          <ToolsTileDeck />
-        </div>
-      ) : activeTileId === 'market-updates' ? (
-        /* Market Updates & Pulse */
-        <div className="hub-grid-2col">
+      {activeTileId === 'market-updates' && (
+        <div className="market-radar-section">
           <TechRadarCard />
-          <ScratchpadCard />
-        </div>
-      ) : activeTileId === 'life-sutras' ? (
-        /* Life Sutras with Wisdom Card & Tree */
-        <div className="hub-body-stack">
-          <WisdomFocusCard />
-          <CourseDocTree />
-          <RevisionFlashcardDeck />
-        </div>
-      ) : (
-        /* Standard Learning Hubs (AI, Coding DSA, System Design, Health, Finance, Apply Job, Open Source) */
-        <div className="hub-body-stack">
-          {/* 1. Hierarchical Tree & Below-Tree Box Grid */}
-          <CourseDocTree />
-
-          {/* 2. Active Recall Flashcards & Quick Notes */}
-          <div className="hub-grid-2col">
-            <RevisionFlashcardDeck />
-            <ScratchpadCard />
-          </div>
         </div>
       )}
+
+      {/* Hub Direct Links & Notes Grid */}
+      <div className="hub-resources-section">
+        <div className="section-header-row">
+          <div className="section-title-wrap">
+            <FileText size={16} color={currentTile.colorAccent} />
+            <h3 className="section-title">Documents, Notes & Direct Launchers</h3>
+          </div>
+          <span className="resource-count-badge">
+            {tileLinks.length} {tileLinks.length === 1 ? 'item' : 'items'}
+          </span>
+        </div>
+
+        {tileLinks.length > 0 ? (
+          <div className="resources-grid">
+            {tileLinks.map((link, idx) => (
+              <LinkFlashcard key={link.id} link={link} index={idx} />
+            ))}
+
+            {/* "+ New Item" Quick Tile */}
+            <div
+              className="add-card-placeholder bento-card"
+              onClick={() => {
+                setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
+                setIsAddLinkModalOpen(true);
+              }}
+              role="button"
+              tabIndex={0}
+            >
+              <div className="plus-circle-aura">
+                <Plus size={22} />
+              </div>
+              <span className="add-text">Add New Note / Link</span>
+              <span className="add-subtext">Direct destination URL or Google Doc</span>
+            </div>
+          </div>
+        ) : (
+          <div className="empty-hub-state bento-card">
+            <SearchX size={36} className="empty-icon" />
+            <h3 className="empty-title">
+              {tileSearch ? 'No items match your search' : 'No documents or links added yet'}
+            </h3>
+            <p className="empty-desc">
+              {tileSearch
+                ? `No resources found matching "${tileSearch}".`
+                : `Add your Google Docs, GitHub repos, or direct destination links to ${currentTile.title}.`}
+            </p>
+            <button
+              onClick={() => {
+                setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
+                setIsAddLinkModalOpen(true);
+              }}
+              className="btn-primary empty-add-btn"
+            >
+              <Plus size={15} />
+              <span>Add First Document / Link</span>
+            </button>
+          </div>
+        )}
+      </div>
 
       <style jsx>{`
         .tile-detail-container {
@@ -229,11 +228,6 @@ export const MasterTileDetailView: React.FC = () => {
           color: var(--text-primary);
         }
 
-        .breadcrumb-subtrack {
-          color: var(--accent-primary);
-          font-weight: 600;
-        }
-
         .hub-hero-banner {
           padding: 1.5rem;
           display: flex;
@@ -245,6 +239,14 @@ export const MasterTileDetailView: React.FC = () => {
             var(--bg-surface-elevated) 100%
           );
           border: 1px solid var(--border-card);
+        }
+
+        .hero-top-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          flex-wrap: wrap;
+          gap: 1rem;
         }
 
         .hero-title {
@@ -260,114 +262,179 @@ export const MasterTileDetailView: React.FC = () => {
           margin-top: 2px;
         }
 
-        .subtracks-bar {
+        .add-doc-btn {
+          padding: 0.5rem 1rem;
+          font-size: 0.82rem;
+        }
+
+        .hub-search-bar {
           display: flex;
           align-items: center;
-          gap: 0.5rem;
-          flex-wrap: wrap;
-          padding-top: 0.4rem;
+          gap: 0.6rem;
+          background: rgba(0, 0, 0, 0.3);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 10px;
+          padding: 0.45rem 0.8rem;
+          max-width: 460px;
         }
 
-        .track-pill-wrapper {
-          position: relative;
-          display: inline-flex;
-          align-items: center;
+        .hub-search-icon {
+          color: var(--text-muted);
         }
 
-        .track-pill {
-          padding-right: 0.85rem;
-        }
-
-        .track-delete-btn {
-          margin-left: -0.4rem;
-          background: rgba(244, 63, 94, 0.15);
-          border: 1px solid rgba(244, 63, 94, 0.3);
-          color: #f43f5e;
-          border-radius: 999px;
-          width: 18px;
-          height: 18px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-
-        .track-delete-btn:hover {
-          background: #f43f5e;
-          color: #fff;
-        }
-
-        .inline-add-track-form {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.35rem;
-          background: var(--bg-surface-elevated);
-          border: 1px solid var(--accent-primary);
-          padding: 0.2rem 0.4rem;
-          border-radius: 999px;
-        }
-
-        .add-track-input {
+        .hub-search-input {
           background: transparent;
           border: none;
           outline: none;
-          color: var(--text-primary);
-          font-size: 0.78rem;
-          padding: 0.2rem 0.4rem;
-          min-width: 160px;
+          color: #ffffff;
+          font-size: 0.82rem;
+          width: 100%;
         }
 
-        .add-track-submit-btn {
-          background: var(--accent-primary);
-          color: #030712;
-          border: none;
-          border-radius: 999px;
-          width: 22px;
-          height: 22px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          font-weight: 700;
-        }
-
-        .add-track-cancel-btn {
+        .clear-search-btn {
           background: transparent;
           border: none;
           color: var(--text-muted);
-          width: 22px;
-          height: 22px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
           cursor: pointer;
+          font-size: 0.8rem;
         }
 
-        .add-track-cancel-btn:hover {
-          color: #f43f5e;
+        .market-radar-section {
+          margin-bottom: 0.5rem;
         }
 
-        .add-track-pill {
-          border-style: dashed;
-        }
-
-        .hub-body-stack {
+        .hub-resources-section {
           display: flex;
           flex-direction: column;
-          gap: 1.75rem;
+          gap: 1rem;
         }
 
-        .hub-grid-2col {
+        .section-header-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+
+        .section-title-wrap {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+
+        .section-title {
+          font-size: 1.05rem;
+          font-weight: 700;
+          color: var(--text-primary);
+        }
+
+        .resource-count-badge {
+          background: var(--bg-surface-elevated);
+          border: 1px solid var(--border-card);
+          color: var(--text-muted);
+          font-size: 0.72rem;
+          font-family: var(--font-mono);
+          padding: 0.2rem 0.55rem;
+          border-radius: 999px;
+        }
+
+        .resources-grid {
           display: grid;
-          grid-template-columns: 1.3fr 1fr;
-          gap: 1.5rem;
-          align-items: stretch;
+          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+          gap: 1.25rem;
         }
 
-        @media (max-width: 1000px) {
-          .hub-grid-2col {
+        .add-card-placeholder {
+          height: 210px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          border: 2px dashed var(--border-card);
+          cursor: pointer;
+          background: transparent;
+          gap: 0.45rem;
+          transition: var(--transition-smooth);
+        }
+
+        .add-card-placeholder:hover {
+          border-color: var(--accent-primary);
+          background: var(--bg-glass-card-hover);
+          transform: translateY(-3px);
+        }
+
+        .plus-circle-aura {
+          width: 42px;
+          height: 42px;
+          border-radius: 50%;
+          background: var(--bg-surface-elevated);
+          border: 1px solid var(--border-card);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: var(--accent-primary);
+          transition: var(--transition-bounce);
+        }
+
+        .add-card-placeholder:hover .plus-circle-aura {
+          background: var(--accent-primary);
+          color: #030712;
+          transform: scale(1.1) rotate(90deg);
+        }
+
+        .add-text {
+          font-size: 0.9rem;
+          font-weight: 700;
+          color: var(--text-primary);
+        }
+
+        .add-subtext {
+          font-size: 0.72rem;
+          color: var(--text-muted);
+          text-align: center;
+          padding: 0 1rem;
+        }
+
+        .empty-hub-state {
+          padding: 3rem 2rem;
+          text-align: center;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 0.75rem;
+        }
+
+        .empty-icon {
+          color: var(--text-muted);
+          opacity: 0.6;
+        }
+
+        .empty-title {
+          font-size: 1.15rem;
+          font-weight: 700;
+          color: var(--text-primary);
+        }
+
+        .empty-desc {
+          font-size: 0.84rem;
+          color: var(--text-secondary);
+          max-width: 440px;
+        }
+
+        .empty-add-btn {
+          margin-top: 0.5rem;
+        }
+
+        @media (max-width: 640px) {
+          .resources-grid {
             grid-template-columns: 1fr;
+          }
+          .hero-top-row {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+          .hub-search-bar {
+            max-width: 100%;
           }
         }
       `}</style>

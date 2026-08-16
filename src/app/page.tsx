@@ -7,9 +7,8 @@ import { DashboardMasterGrid } from '@/components/DashboardMasterGrid';
 import { MasterTileDetailView } from '@/components/MasterTileDetailView';
 import { RecentHistoryCard } from '@/components/RecentHistoryCard';
 import { ActivityLogCard } from '@/components/ActivityLogCard';
-import { ScratchpadCard } from '@/components/ScratchpadCard';
+import { DailyVoiceNotesCard } from '@/components/DailyVoiceNotesCard';
 import { AddEditLinkModal } from '@/components/AddEditLinkModal';
-import { AddEditRevisionModal } from '@/components/AddEditRevisionModal';
 import { CommandPaletteModal } from '@/components/CommandPaletteModal';
 
 export default function Home() {
@@ -17,7 +16,7 @@ export default function Home() {
 
   return (
     <main className="drishti-app-wrapper">
-      {/* Clean Header (Brand, Search bar, Theme switcher, Scale slider) */}
+      {/* Clean Header (Brand, Search bar, Theme switcher, Scale slider, Voice Notes Trigger) */}
       <Header />
 
       {/* Main Content Area */}
@@ -28,19 +27,19 @@ export default function Home() {
             {/* The 10 Focus & Learning Hub Tiles */}
             <DashboardMasterGrid />
 
-            {/* Quick Analytics & History Row */}
+            {/* Daily Voice Journal & Audio-to-Text Dictation Deck */}
+            <section id="daily-voice-journal-section" className="dashboard-voice-section">
+              <DailyVoiceNotesCard />
+            </section>
+
+            {/* Recent History & Activity Tracker Grid */}
             <section className="dashboard-secondary-grid">
               <div className="secondary-col-left">
                 <RecentHistoryCard />
               </div>
               <div className="secondary-col-right">
-                <ScratchpadCard />
+                <ActivityLogCard />
               </div>
-            </section>
-
-            {/* Daily, Weekly & Monthly Activity Logger & CSV Exporter */}
-            <section className="dashboard-activity-section">
-              <ActivityLogCard />
             </section>
           </div>
         ) : (
@@ -51,7 +50,6 @@ export default function Home() {
 
       {/* Global Modals */}
       <AddEditLinkModal />
-      <AddEditRevisionModal />
       <CommandPaletteModal />
 
       <style jsx>{`
@@ -77,9 +75,13 @@ export default function Home() {
           gap: 2.25rem;
         }
 
+        .dashboard-voice-section {
+          width: 100%;
+        }
+
         .dashboard-secondary-grid {
           display: grid;
-          grid-template-columns: 1.25fr 1fr;
+          grid-template-columns: 1fr 1.35fr;
           gap: 1.5rem;
           align-items: stretch;
         }
@@ -88,10 +90,6 @@ export default function Home() {
         .secondary-col-right {
           display: flex;
           flex-direction: column;
-        }
-
-        .dashboard-activity-section {
-          width: 100%;
         }
 
         @media (max-width: 1080px) {

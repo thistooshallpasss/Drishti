@@ -1,7 +1,7 @@
 ================================================================================
 DRISHTI (दृष्टि) - COMPLETE CODEBASE SNAPSHOT
-Generated on: 2026-08-12 01:01:31
-Total files captured: 33
+Generated on: 2026-08-16 21:04:48
+Total files captured: 30
 ================================================================================
 
 PROJECT FILE TREE:
@@ -20,24 +20,22 @@ PROJECT FILE TREE:
 │   ├── components
 │   │   ├── ActivityLogCard.tsx
 │   │   ├── AddEditLinkModal.tsx
-│   │   ├── AddEditRevisionModal.tsx
 │   │   ├── CommandPaletteModal.tsx
-│   │   ├── CourseDocTree.tsx
+│   │   ├── DailyVoiceNotesCard.tsx
 │   │   ├── DashboardMasterGrid.tsx
 │   │   ├── Header.tsx
 │   │   ├── LinkFlashcard.tsx
 │   │   ├── LinkFlashcardDeck.tsx
 │   │   ├── MasterTileDetailView.tsx
 │   │   ├── RecentHistoryCard.tsx
-│   │   ├── RevisionFlashcardDeck.tsx
-│   │   ├── ScratchpadCard.tsx
 │   │   ├── TechRadarCard.tsx
-│   │   ├── ToolsTileDeck.tsx
-│   │   └── WisdomFocusCard.tsx
+│   │   └── ToolsTileDeck.tsx
 │   ├── context
 │   │   └── DrishtiContext.tsx
 │   ├── data
 │   │   └── initialData.ts
+│   ├── hooks
+│   │   └── useSpeechToText.ts
 │   ├── lib
 │   │   └── supabaseClient.ts
 │   ├── styles
@@ -323,6 +321,10 @@ cd /Users/harshramsuratyadav/Documents/Drishti
 npm run dev
 ```
 Open **[http://localhost:3000](http://localhost:3000)** in your browser.
+
+
+i want to add this feature of downloading notes in activity tracker section i will have log of my activites on net and notes of my recorded things both seperately but at one place i want to add this feature that for each activity or note i can download that as a text file with the title and the note content .
+
 
 
 ================================================================================
@@ -637,13 +639,13 @@ export interface MasterTileInfo {
   subtitle: string;
   iconName: string;
   colorAccent: string;
-  subTracks: string[];
 }
 
 export type LinkCategory = 'all' | 'social' | 'productivity' | 'ai' | 'media' | 'spiritual' | 'custom';
 
 export interface DeepLinkItem {
   id: string;
+  masterTileId?: MasterTileId;
   title: string;
   url: string;
   category: LinkCategory;
@@ -721,6 +723,16 @@ export interface TechNewsItem {
   impactScore: number;
 }
 
+export interface DailyVoiceEntry {
+  id: string; // e.g. "voice-2026-08-16"
+  dateKey: string; // "YYYY-MM-DD"
+  fullDateHeading: string; // e.g. "Sunday, 16 August 2026"
+  content: string; // Aggregated notes for the day
+  sessionsCount: number; // Number of dictation sessions that day
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type ThemeMode = 'obsidian' | 'midnight' | 'cyber' | 'sunset' | 'paper';
 
 export interface DrishtiSettings {
@@ -750,6 +762,7 @@ import {
   RevisionCategory,
   CourseTreeNode,
   ActivityLogItem,
+  DailyVoiceEntry,
 } from '@/types';
 import {
   MASTER_TILES,
@@ -759,6 +772,7 @@ import {
   INITIAL_SETTINGS,
   INITIAL_COURSE_TREE_NODES,
   INITIAL_ACTIVITY_LOGS,
+  INITIAL_DAILY_VOICE_NOTES,
 } from '@/data/initialData';
 import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 
@@ -813,6 +827,15 @@ interface DrishtiContextType {
   flushScratchpadToCloud: (content: string) => void;
   scratchpadLanguage: string;
   setScratchpadLanguage: (lang: string) => void;
+  dailyVoiceNotes: DailyVoiceEntry[];
+  todayVoiceEntry: DailyVoiceEntry | null;
+  appendVoiceNote: (transcript: string) => void;
+  updateDailyVoiceNote: (id: string, newContent: string) => void;
+  deleteDailyVoiceNote: (id: string) => void;
+  downloadVoiceNoteFile: (dateKey: string) => void;
+  exportAllVoiceNotes: () => void;
+  isVoiceDictationModalOpen: boolean;
+  setIsVoiceDictationModalOpen: (open: boolean) => void;
   settings: DrishtiSettings;
   setTheme: (theme: ThemeMode) => void;
   setUiScale: (scale: number) => void;
@@ -840,6 +863,7 @@ const STORAGE_KEY_LOGS = 'drishti_logs_v5';
 const STORAGE_KEY_SETTINGS = 'drishti_settings_v5';
 const STORAGE_KEY_SCRATCHPAD = 'drishti_scratchpad_v5';
 const STORAGE_KEY_CUSTOM_SUBTRACKS = 'drishti_custom_subtracks_v5';
+const STORAGE_KEY_VOICE_NOTES = 'drishti_voice_notes_v5';
 const ECHO_GUARD_TTL_MS = 3000;
 
 export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -887,22 +911,31 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [editingLink, setEditingLink] = useState<DeepLinkItem | null>(null);
   const [isAddRevisionModalOpen, setIsAddRevisionModalOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isVoiceDictationModalOpen, setIsVoiceDictationModalOpen] = useState(false);
+  const [dailyVoiceNotes, setDailyVoiceNotes] = useState<DailyVoiceEntry[]>(INITIAL_DAILY_VOICE_NOTES);
+
+  // 14-Day (2-Week) Rolling Retention Filter - Automatically purges entries older than 14 days
+  const filter14DayVoiceNotes = useCallback((rawNotes: DailyVoiceEntry[]): DailyVoiceEntry[] => {
+    const now = new Date().getTime();
+    const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
+    return (rawNotes || []).filter((note) => {
+      if (!note || !note.dateKey) return false;
+      const noteTime = new Date(note.dateKey).getTime();
+      return (now - noteTime) <= fourteenDaysMs;
+    });
+  }, []);
+
+  const todayKey = new Date().toISOString().split('T')[0];
+  const todayVoiceEntry = useMemo(() => {
+    return dailyVoiceNotes.find((entry) => entry.dateKey === todayKey) || null;
+  }, [dailyVoiceNotes, todayKey]);
 
   const getSubTracksForTile = useCallback(
     (tileId: MasterTileId): string[] => {
-      const baseTile = MASTER_TILES.find((t) => t.id === tileId);
-      const baseTracks = baseTile ? baseTile.subTracks : [];
       const custom = customSubTracks[tileId] || [];
-      const fromTree = treeNodes
-        .filter((n) => n.masterTileId === tileId && n.subTrack && n.subTrack.trim() !== '')
-        .map((n) => n.subTrack.trim());
-      const uniqueSet = new Set<string>();
-      baseTracks.forEach((t) => uniqueSet.add(t));
-      custom.forEach((t) => uniqueSet.add(t));
-      fromTree.forEach((t) => uniqueSet.add(t));
-      return Array.from(uniqueSet);
+      return custom;
     },
-    [customSubTracks, treeNodes]
+    [customSubTracks]
   );
 
   const addCustomSubTrack = useCallback((tileId: MasterTileId, name: string) => {
@@ -1035,11 +1068,13 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (savedScratch) setScratchpadContentState(savedScratch);
         const savedSubTracks = localStorage.getItem(STORAGE_KEY_CUSTOM_SUBTRACKS);
         if (savedSubTracks) setCustomSubTracks(JSON.parse(savedSubTracks));
+        const savedVoice = localStorage.getItem(STORAGE_KEY_VOICE_NOTES);
+        if (savedVoice) setDailyVoiceNotes(filter14DayVoiceNotes(JSON.parse(savedVoice)));
       } catch (e) { console.warn('Local storage read error', e); }
       await fetchFromCloud();
     };
     initData();
-  }, [filter60DayLogs, fetchFromCloud]);
+  }, [filter60DayLogs, filter14DayVoiceNotes, fetchFromCloud]);
 
   useEffect(() => {
     if (!supabase || !isSupabaseConfigured()) return;
@@ -1195,6 +1230,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } catch (e) {}
   }, [settings]);
   useEffect(() => { try { localStorage.setItem(STORAGE_KEY_SCRATCHPAD, scratchpadContent); } catch (e) {} }, [scratchpadContent]);
+  useEffect(() => { try { localStorage.setItem(STORAGE_KEY_VOICE_NOTES, JSON.stringify(dailyVoiceNotes)); } catch (e) {} }, [dailyVoiceNotes]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1496,8 +1532,140 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     URL.revokeObjectURL(url);
   };
 
+  // Daily Voice Journal & Dictation Methods (14-day rolling retention)
+  const appendVoiceNote = useCallback(
+    (transcript: string) => {
+      const clean = transcript.trim();
+      if (!clean) return;
+
+      const now = new Date();
+      const todayDateKey = now.toISOString().split('T')[0];
+      const heading = now.toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const newBlock = `### 🎙️ [${timeStr}]\n${clean}`;
+
+      setDailyVoiceNotes((prev) => {
+        const valid = filter14DayVoiceNotes(prev);
+        const existingIndex = valid.findIndex((n) => n.dateKey === todayDateKey);
+        let updated: DailyVoiceEntry[];
+
+        if (existingIndex >= 0) {
+          const existing = valid[existingIndex];
+          const updatedEntry: DailyVoiceEntry = {
+            ...existing,
+            content: `${existing.content}\n\n${newBlock}`,
+            sessionsCount: (existing.sessionsCount || 1) + 1,
+            updatedAt: now.toISOString(),
+          };
+          updated = [
+            ...valid.slice(0, existingIndex),
+            updatedEntry,
+            ...valid.slice(existingIndex + 1),
+          ];
+        } else {
+          const newEntry: DailyVoiceEntry = {
+            id: `voice-${todayDateKey}`,
+            dateKey: todayDateKey,
+            fullDateHeading: heading,
+            content: `# ${heading}\n\n${newBlock}`,
+            sessionsCount: 1,
+            createdAt: now.toISOString(),
+            updatedAt: now.toISOString(),
+          };
+          updated = [newEntry, ...valid];
+        }
+
+        try {
+          localStorage.setItem(STORAGE_KEY_VOICE_NOTES, JSON.stringify(updated));
+        } catch (e) {}
+
+        return updated;
+      });
+
+      logActivity(`Voice note recorded for ${heading}`, '#voice-journal', 'Audio Dictation', 'link');
+    },
+    [filter14DayVoiceNotes]
+  );
+
+  const updateDailyVoiceNote = useCallback((id: string, newContent: string) => {
+    setDailyVoiceNotes((prev) => {
+      const updated = prev.map((entry) =>
+        entry.id === id
+          ? { ...entry, content: newContent, updatedAt: new Date().toISOString() }
+          : entry
+      );
+      try {
+        localStorage.setItem(STORAGE_KEY_VOICE_NOTES, JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  }, []);
+
+  const deleteDailyVoiceNote = useCallback((id: string) => {
+    setDailyVoiceNotes((prev) => {
+      const updated = prev.filter((entry) => entry.id !== id);
+      try {
+        localStorage.setItem(STORAGE_KEY_VOICE_NOTES, JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  }, []);
+
+  const downloadVoiceNoteFile = useCallback(
+    (dateKey: string) => {
+      const entry = dailyVoiceNotes.find((n) => n.dateKey === dateKey);
+      if (!entry) return;
+
+      const headerMeta = `=======================================================\nDRISHTI (दृष्टि) - DAILY VOICE NOTES & DICTATION LOG\nDate: ${entry.fullDateHeading}\nSessions: ${entry.sessionsCount}\nUpdated: ${new Date(entry.updatedAt).toLocaleTimeString()}\n=======================================================\n\n`;
+      const fileBody = headerMeta + entry.content;
+
+      const blob = new Blob([fileBody], { type: 'text/plain;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Drishti_VoiceNotes_${dateKey}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    [dailyVoiceNotes]
+  );
+
+  const exportAllVoiceNotes = useCallback(() => {
+    if (dailyVoiceNotes.length === 0) return;
+
+    let combined = `=======================================================\nDRISHTI (दृष्टि) - COMPLETE 14-DAY VOICE JOURNAL ARCHIVE\nExported: ${new Date().toLocaleString()}\nTotal Days: ${dailyVoiceNotes.length}\nAuto-Purge Window: 14 Days (2 Weeks)\n=======================================================\n\n`;
+
+    for (const entry of dailyVoiceNotes) {
+      combined += `\n#######################################################\n# ${entry.fullDateHeading} (${entry.sessionsCount} sessions)\n#######################################################\n\n${entry.content}\n\n`;
+    }
+
+    const blob = new Blob([combined], { type: 'text/plain;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Drishti_All_VoiceNotes_14Days_${new Date().toISOString().split('T')[0]}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [dailyVoiceNotes]);
+
   const exportDataJson = () => {
-    const backupData = { version: '5.0', exportedAt: new Date().toISOString(), links, treeNodes, revisionCards, activityLogs, settings, scratchpadContent, customSubTracks };
+    const backupData = {
+      version: '5.0',
+      exportedAt: new Date().toISOString(),
+      links,
+      treeNodes,
+      revisionCards,
+      activityLogs,
+      settings,
+      scratchpadContent,
+      customSubTracks,
+      dailyVoiceNotes,
+    };
     const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1514,6 +1682,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setActivityLogs(INITIAL_ACTIVITY_LOGS);
     setSettings(INITIAL_SETTINGS);
     setCustomSubTracks({});
+    setDailyVoiceNotes(INITIAL_DAILY_VOICE_NOTES);
     if (supabase && isSupabaseConfigured()) {
       try {
         await Promise.all([
@@ -1546,6 +1715,9 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
         activityLogs, logActivity, recentOpenedHistory, exportLogs,
         newsItems, scratchpadContent, setScratchpadContent, flushScratchpadToCloud,
         scratchpadLanguage, setScratchpadLanguage,
+        dailyVoiceNotes, todayVoiceEntry, appendVoiceNote, updateDailyVoiceNote,
+        deleteDailyVoiceNote, downloadVoiceNoteFile, exportAllVoiceNotes,
+        isVoiceDictationModalOpen, setIsVoiceDictationModalOpen,
         settings, setTheme, setUiScale, updateSettings,
         isAddLinkModalOpen, setIsAddLinkModalOpen,
         defaultModalCategory, setDefaultModalCategory,
@@ -1613,9 +1785,8 @@ import { DashboardMasterGrid } from '@/components/DashboardMasterGrid';
 import { MasterTileDetailView } from '@/components/MasterTileDetailView';
 import { RecentHistoryCard } from '@/components/RecentHistoryCard';
 import { ActivityLogCard } from '@/components/ActivityLogCard';
-import { ScratchpadCard } from '@/components/ScratchpadCard';
+import { DailyVoiceNotesCard } from '@/components/DailyVoiceNotesCard';
 import { AddEditLinkModal } from '@/components/AddEditLinkModal';
-import { AddEditRevisionModal } from '@/components/AddEditRevisionModal';
 import { CommandPaletteModal } from '@/components/CommandPaletteModal';
 
 export default function Home() {
@@ -1623,7 +1794,7 @@ export default function Home() {
 
   return (
     <main className="drishti-app-wrapper">
-      {/* Clean Header (Brand, Search bar, Theme switcher, Scale slider) */}
+      {/* Clean Header (Brand, Search bar, Theme switcher, Scale slider, Voice Notes Trigger) */}
       <Header />
 
       {/* Main Content Area */}
@@ -1634,19 +1805,19 @@ export default function Home() {
             {/* The 10 Focus & Learning Hub Tiles */}
             <DashboardMasterGrid />
 
-            {/* Quick Analytics & History Row */}
+            {/* Daily Voice Journal & Audio-to-Text Dictation Deck */}
+            <section id="daily-voice-journal-section" className="dashboard-voice-section">
+              <DailyVoiceNotesCard />
+            </section>
+
+            {/* Recent History & Activity Tracker Grid */}
             <section className="dashboard-secondary-grid">
               <div className="secondary-col-left">
                 <RecentHistoryCard />
               </div>
               <div className="secondary-col-right">
-                <ScratchpadCard />
+                <ActivityLogCard />
               </div>
-            </section>
-
-            {/* Daily, Weekly & Monthly Activity Logger & CSV Exporter */}
-            <section className="dashboard-activity-section">
-              <ActivityLogCard />
             </section>
           </div>
         ) : (
@@ -1657,7 +1828,6 @@ export default function Home() {
 
       {/* Global Modals */}
       <AddEditLinkModal />
-      <AddEditRevisionModal />
       <CommandPaletteModal />
 
       <style jsx>{`
@@ -1683,9 +1853,13 @@ export default function Home() {
           gap: 2.25rem;
         }
 
+        .dashboard-voice-section {
+          width: 100%;
+        }
+
         .dashboard-secondary-grid {
           display: grid;
-          grid-template-columns: 1.25fr 1fr;
+          grid-template-columns: 1fr 1.35fr;
           gap: 1.5rem;
           align-items: stretch;
         }
@@ -1694,10 +1868,6 @@ export default function Home() {
         .secondary-col-right {
           display: flex;
           flex-direction: column;
-        }
-
-        .dashboard-activity-section {
-          width: 100%;
         }
 
         @media (max-width: 1080px) {
@@ -2247,17 +2417,46 @@ FILE: src/components/ActivityLogCard.tsx
 
 import React, { useState } from 'react';
 import { useDrishti } from '@/context/DrishtiContext';
-import { Activity, Download, Calendar, BarChart3, Clock, CheckCircle } from 'lucide-react';
+import { ActivityLogItem, DailyVoiceEntry } from '@/types';
+import {
+  Activity,
+  Download,
+  Calendar,
+  BarChart3,
+  Clock,
+  CheckCircle,
+  FileText,
+  Mic,
+  Globe,
+  Copy,
+  Check,
+  Trash2,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
 
 export const ActivityLogCard: React.FC = () => {
-  const { activityLogs, exportLogs } = useDrishti();
-  const [activeTimeframe, setActiveTimeframe] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+  const {
+    activityLogs,
+    exportLogs,
+    dailyVoiceNotes,
+    downloadVoiceNoteFile,
+    exportAllVoiceNotes,
+    deleteDailyVoiceNote,
+  } = useDrishti();
+
+  const [activeTab, setActiveTab] = useState<'web' | 'notes'>('web');
+  const [activeTimeframe, setActiveTimeframe] = useState<'daily' | 'weekly' | 'monthly' | 'all'>('daily');
   const [exportedNotice, setExportedNotice] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
 
   const todayStr = new Date().toISOString().split('T')[0];
   const now = new Date();
 
-  const filteredLogs = activityLogs.filter((log) => {
+  // Filter web activity logs
+  const filteredWebLogs = activityLogs.filter((log) => {
+    if (activeTimeframe === 'all') return true;
     if (activeTimeframe === 'daily') return log.dateStr === todayStr;
 
     const logDate = new Date(log.timestamp);
@@ -2267,10 +2466,48 @@ export const ActivityLogCard: React.FC = () => {
     return true;
   });
 
-  const handleExport = (tf: 'daily' | 'weekly' | 'monthly') => {
+  const handleExportCsv = (tf: 'daily' | 'weekly' | 'monthly' | 'all') => {
     exportLogs(tf);
-    setExportedNotice(`Exported ${tf} activity log!`);
+    setExportedNotice(`Exported ${tf.toUpperCase()} CSV activity log!`);
     setTimeout(() => setExportedNotice(null), 3000);
+  };
+
+  // 1-Click single web activity download as .txt file
+  const downloadSingleActivityTxt = (log: ActivityLogItem) => {
+    const fileBody = `=======================================================
+DRISHTI (दृष्टि) - ACTIVITY RECORD
+Title: ${log.title}
+Category: ${log.category}
+Type: ${log.type.toUpperCase()}
+URL: ${log.url}
+Date: ${log.dateStr}
+Time: ${log.timeStr}
+Timestamp: ${log.timestamp}
+=======================================================
+
+Activity Summary:
+- Item: ${log.title}
+- Destination: ${log.url}
+- Logged At: ${new Date(log.timestamp).toLocaleString()}
+`;
+
+    const blob = new Blob([fileBody], { type: 'text/plain;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const cleanTitle = log.title.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30);
+    a.download = `Activity_${log.dateStr}_${cleanTitle}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    setExportedNotice(`Downloaded text file for "${log.title}"`);
+    setTimeout(() => setExportedNotice(null), 3000);
+  };
+
+  const handleCopyNote = (id: string, content: string) => {
+    navigator.clipboard.writeText(content);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
   };
 
   return (
@@ -2282,77 +2519,226 @@ export const ActivityLogCard: React.FC = () => {
             <BarChart3 size={17} />
           </div>
           <div>
-            <h3 className="card-title">Study & Click Activity Tracker</h3>
-            <p className="card-sub">Automatic daily, weekly & monthly session tracking</p>
+            <h3 className="card-title">Activity Tracker & Download Center</h3>
+            <p className="card-sub">
+              Dual log for web browsing activity & daily voice notes with 1-click text file export
+            </p>
           </div>
         </div>
 
-        {/* Timeframe selector tabs */}
-        <div className="timeframe-pills">
-          {(['daily', 'weekly', 'monthly'] as const).map((tf) => (
-            <button
-              key={tf}
-              onClick={() => setActiveTimeframe(tf)}
-              className={`filter-pill mini-tf-pill ${activeTimeframe === tf ? 'active' : ''}`}
-            >
-              {tf.toUpperCase()}
-            </button>
-          ))}
-        </div>
-      </div>
+        {/* Dual Tab Switcher: Web Activity vs Voice Notes */}
+        <div className="tracker-tab-switcher">
+          <button
+            onClick={() => setActiveTab('web')}
+            className={`tab-switch-btn ${activeTab === 'web' ? 'active' : ''}`}
+          >
+            <Globe size={13} />
+            <span>Web Activity ({activityLogs.length})</span>
+          </button>
 
-      {/* Export Toolbar */}
-      <div className="export-toolbar-row">
-        <div className="log-count-info">
-          <Clock size={13} />
-          <span>
-            <strong>{filteredLogs.length}</strong> actions recorded ({activeTimeframe})
-          </span>
+          <button
+            onClick={() => setActiveTab('notes')}
+            className={`tab-switch-btn ${activeTab === 'notes' ? 'active' : ''}`}
+          >
+            <Mic size={13} />
+            <span>Voice Notes ({dailyVoiceNotes.length} days)</span>
+          </button>
         </div>
-
-        <button
-          onClick={() => handleExport(activeTimeframe)}
-          className="btn-primary mini-export-btn"
-          title={`Download ${activeTimeframe} CSV log`}
-        >
-          <Download size={13} />
-          <span>Export {activeTimeframe.toUpperCase()} CSV</span>
-        </button>
       </div>
 
       {exportedNotice && (
         <div className="export-success-banner">
-          <CheckCircle size={13} color="#10b981" />
+          <CheckCircle size={14} color="#10b981" />
           <span>{exportedNotice}</span>
         </div>
       )}
 
-      {/* Recent Logs Snippet List */}
-      <div className="logs-stream-list">
-        {filteredLogs.slice(0, 8).map((log) => (
-          <div key={log.id} className="log-stream-row">
-            <div className="log-badge-time">
-              <span className={`log-type-tag type-${log.type}`}>{log.type.replace('_', ' ')}</span>
-              <span className="log-time">{log.timeStr || log.dateStr}</span>
+      {/* ================= VIEW 1: WEB & LINK ACTIVITY LOGS ================= */}
+      {activeTab === 'web' && (
+        <div className="tab-pane-content">
+          {/* Controls Bar */}
+          <div className="export-toolbar-row">
+            <div className="timeframe-pills">
+              {(['daily', 'weekly', 'monthly', 'all'] as const).map((tf) => (
+                <button
+                  key={tf}
+                  onClick={() => setActiveTimeframe(tf)}
+                  className={`filter-pill mini-tf-pill ${activeTimeframe === tf ? 'active' : ''}`}
+                >
+                  {tf.toUpperCase()}
+                </button>
+              ))}
             </div>
-            <span className="log-title-text">{log.title}</span>
-          </div>
-        ))}
 
-        {filteredLogs.length === 0 && (
-          <div className="empty-logs">
-            <Calendar size={20} className="empty-icon" />
-            <span>No activity recorded for this timeframe yet.</span>
+            <div className="toolbar-right-actions">
+              <span className="log-count-text">
+                <Clock size={12} />
+                <strong>{filteredWebLogs.length}</strong> events
+              </span>
+
+              <button
+                onClick={() => handleExportCsv(activeTimeframe)}
+                className="btn-primary mini-export-btn"
+                title={`Download ${activeTimeframe} CSV log`}
+              >
+                <Download size={12} />
+                <span>Export CSV</span>
+              </button>
+            </div>
           </div>
-        )}
-      </div>
+
+          {/* Web Logs Stream */}
+          <div className="logs-stream-list">
+            {filteredWebLogs.slice(0, 10).map((log) => (
+              <div key={log.id} className="log-stream-row">
+                <div className="log-left-meta">
+                  <span className={`log-type-tag type-${log.type}`}>
+                    {log.type.replace('_', ' ')}
+                  </span>
+                  <span className="log-time">{log.timeStr || log.dateStr}</span>
+                  <span className="log-category-pill">{log.category}</span>
+                </div>
+
+                <div className="log-center-title" title={log.url}>
+                  <span className="log-title-text">{log.title}</span>
+                  <span className="log-url-snippet">{log.url}</span>
+                </div>
+
+                <div className="log-row-actions">
+                  <button
+                    onClick={() => downloadSingleActivityTxt(log)}
+                    className="btn-row-download"
+                    title={`Download text file record for "${log.title}"`}
+                  >
+                    <Download size={12} />
+                    <span>.txt</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            {filteredWebLogs.length === 0 && (
+              <div className="empty-logs">
+                <Calendar size={22} className="empty-icon" />
+                <span>No web activity recorded for this timeframe yet.</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ================= VIEW 2: RECORDED VOICE NOTES & TRANSCRIPTS ================= */}
+      {activeTab === 'notes' && (
+        <div className="tab-pane-content">
+          {/* Notes Toolbar */}
+          <div className="export-toolbar-row">
+            <div className="log-count-info">
+              <Mic size={13} color="#a855f7" />
+              <span>
+                <strong>{dailyVoiceNotes.length}</strong> Days in 14-day rolling archive
+              </span>
+            </div>
+
+            {dailyVoiceNotes.length > 0 && (
+              <button
+                onClick={exportAllVoiceNotes}
+                className="btn-primary mini-export-btn"
+                title="Download combined archive of all 14 days notes"
+              >
+                <Download size={12} />
+                <span>Download All 14 Days (.txt)</span>
+              </button>
+            )}
+          </div>
+
+          {/* Notes Stream */}
+          <div className="notes-stream-list">
+            {dailyVoiceNotes.map((note) => {
+              const isExpanded = expandedNoteId === note.id;
+              const preview = note.content.replace(/^#.*\n+/, '').slice(0, 120);
+
+              return (
+                <div key={note.id} className="note-card-row">
+                  <div
+                    className="note-row-main"
+                    onClick={() => setExpandedNoteId(isExpanded ? null : note.id)}
+                  >
+                    <div className="note-date-badge">
+                      <Calendar size={13} color="#38bdf8" />
+                      <span className="note-date-text">{note.fullDateHeading}</span>
+                      <span className="note-sessions-tag">
+                        {note.sessionsCount} {note.sessionsCount === 1 ? 'session' : 'sessions'}
+                      </span>
+                    </div>
+
+                    <div className="note-preview-text">
+                      {preview}...
+                    </div>
+
+                    <div className="note-actions-wrap" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => downloadVoiceNoteFile(note.dateKey)}
+                        className="btn-row-download primary"
+                        title={`Download text file for ${note.fullDateHeading}`}
+                      >
+                        <Download size={12} />
+                        <span>Download .txt</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleCopyNote(note.id, note.content)}
+                        className="btn-row-download"
+                        title="Copy note content"
+                      >
+                        {copiedId === note.id ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          if (confirm(`Delete notes for ${note.fullDateHeading}?`)) {
+                            deleteDailyVoiceNote(note.id);
+                          }
+                        }}
+                        className="btn-row-download danger"
+                        title="Delete Day Note"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+
+                      <button
+                        onClick={() => setExpandedNoteId(isExpanded ? null : note.id)}
+                        className="btn-row-download toggle"
+                      >
+                        {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="note-expanded-body">
+                      <pre className="note-full-text">{note.content}</pre>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {dailyVoiceNotes.length === 0 && (
+              <div className="empty-logs">
+                <Mic size={22} className="empty-icon" />
+                <span>No voice notes recorded yet. Use the Daily Voice Journal above to record!</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <style jsx>{`
         .activity-log-container {
           padding: 1.25rem;
           display: flex;
           flex-direction: column;
-          gap: 0.85rem;
+          gap: 1rem;
           height: 100%;
         }
 
@@ -2361,7 +2747,7 @@ export const ActivityLogCard: React.FC = () => {
           align-items: center;
           justify-content: space-between;
           flex-wrap: wrap;
-          gap: 0.5rem;
+          gap: 0.75rem;
         }
 
         .title-group {
@@ -2392,9 +2778,47 @@ export const ActivityLogCard: React.FC = () => {
           color: var(--text-muted);
         }
 
+        .tracker-tab-switcher {
+          display: flex;
+          background: var(--bg-surface-elevated);
+          padding: 0.2rem;
+          border-radius: 8px;
+          border: 1px solid var(--border-card);
+          gap: 0.25rem;
+        }
+
+        .tab-switch-btn {
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          padding: 0.35rem 0.75rem;
+          border-radius: 6px;
+          font-size: 0.76rem;
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          gap: 0.4rem;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .tab-switch-btn.active {
+          background: var(--bg-surface);
+          color: var(--text-primary);
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+          border: 1px solid var(--border-card);
+        }
+
+        .tab-pane-content {
+          display: flex;
+          flex-direction: column;
+          gap: 0.75rem;
+        }
+
         .timeframe-pills {
           display: flex;
           gap: 0.3rem;
+          flex-wrap: wrap;
         }
 
         .mini-tf-pill {
@@ -2410,19 +2834,31 @@ export const ActivityLogCard: React.FC = () => {
           border: 1px solid var(--border-card);
           padding: 0.55rem 0.8rem;
           border-radius: 8px;
+          flex-wrap: wrap;
+          gap: 0.5rem;
         }
 
+        .toolbar-right-actions {
+          display: flex;
+          align-items: center;
+          gap: 0.65rem;
+        }
+
+        .log-count-text,
         .log-count-info {
           display: flex;
           align-items: center;
-          gap: 0.4rem;
-          font-size: 0.76rem;
+          gap: 0.35rem;
+          font-size: 0.74rem;
           color: var(--text-secondary);
         }
 
         .mini-export-btn {
-          padding: 0.3rem 0.7rem;
-          font-size: 0.74rem;
+          padding: 0.28rem 0.65rem;
+          font-size: 0.72rem;
+          display: flex;
+          align-items: center;
+          gap: 0.3rem;
         }
 
         .export-success-banner {
@@ -2435,31 +2871,40 @@ export const ActivityLogCard: React.FC = () => {
           font-size: 0.75rem;
           padding: 0.35rem 0.65rem;
           border-radius: 6px;
+          animation: fadeIn 0.2s ease;
         }
 
-        .logs-stream-list {
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(-3px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        .logs-stream-list,
+        .notes-stream-list {
           display: flex;
           flex-direction: column;
-          gap: 0.35rem;
+          gap: 0.45rem;
           overflow-y: auto;
-          max-height: 240px;
+          max-height: 280px;
         }
 
         .log-stream-row {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0.45rem 0.65rem;
+          padding: 0.5rem 0.75rem;
           background: var(--bg-surface-elevated);
-          border-radius: 6px;
+          border: 1px solid var(--border-card);
+          border-radius: 8px;
           font-size: 0.78rem;
-          gap: 0.5rem;
+          gap: 0.75rem;
         }
 
-        .log-badge-time {
+        .log-left-meta {
           display: flex;
           align-items: center;
           gap: 0.45rem;
+          flex-shrink: 0;
         }
 
         .log-type-tag {
@@ -2491,28 +2936,188 @@ export const ActivityLogCard: React.FC = () => {
           font-family: var(--font-mono);
         }
 
+        .log-category-pill {
+          font-size: 0.64rem;
+          background: rgba(255, 255, 255, 0.04);
+          padding: 0.05rem 0.35rem;
+          border-radius: 4px;
+          color: var(--text-muted);
+        }
+
+        .log-center-title {
+          flex: 1;
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+        }
+
         .log-title-text {
           color: var(--text-primary);
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          font-weight: 500;
+          font-weight: 600;
+          font-size: 0.8rem;
+        }
+
+        .log-url-snippet {
+          color: var(--text-muted);
+          font-size: 0.68rem;
+          font-family: var(--font-mono);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .log-row-actions {
+          flex-shrink: 0;
+        }
+
+        .btn-row-download {
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          color: var(--text-secondary);
+          padding: 0.22rem 0.5rem;
+          border-radius: 5px;
+          font-size: 0.7rem;
+          font-weight: 600;
+          display: inline-flex;
+          align-items: center;
+          gap: 0.25rem;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .btn-row-download:hover {
+          color: var(--text-primary);
+          background: rgba(255, 255, 255, 0.12);
+        }
+
+        .btn-row-download.primary {
+          background: rgba(56, 189, 248, 0.12);
+          border-color: rgba(56, 189, 248, 0.3);
+          color: #38bdf8;
+        }
+
+        .btn-row-download.primary:hover {
+          background: #38bdf8;
+          color: #030712;
+        }
+
+        .btn-row-download.danger:hover {
+          background: rgba(239, 68, 68, 0.15);
+          border-color: rgba(239, 68, 68, 0.4);
+          color: #ef4444;
+        }
+
+        .btn-row-download.toggle {
+          padding: 0.22rem 0.35rem;
+        }
+
+        /* Note card rows */
+        .note-card-row {
+          background: var(--bg-surface-elevated);
+          border: 1px solid var(--border-card);
+          border-radius: 8px;
+          overflow: hidden;
+        }
+
+        .note-row-main {
+          padding: 0.6rem 0.8rem;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 0.75rem;
+          cursor: pointer;
+          transition: background 0.2s ease;
+        }
+
+        .note-row-main:hover {
+          background: rgba(255, 255, 255, 0.03);
+        }
+
+        .note-date-badge {
+          display: flex;
+          align-items: center;
+          gap: 0.45rem;
+          flex-shrink: 0;
+        }
+
+        .note-date-text {
+          font-size: 0.82rem;
+          font-weight: 700;
+          color: var(--text-primary);
+        }
+
+        .note-sessions-tag {
+          background: rgba(56, 189, 248, 0.1);
+          color: #38bdf8;
+          font-size: 0.66rem;
+          font-weight: 600;
+          padding: 0.08rem 0.35rem;
+          border-radius: 4px;
+        }
+
+        .note-preview-text {
+          flex: 1;
+          font-size: 0.74rem;
+          color: var(--text-muted);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .note-actions-wrap {
+          display: flex;
+          align-items: center;
+          gap: 0.35rem;
+          flex-shrink: 0;
+        }
+
+        .note-expanded-body {
+          padding: 0.75rem 0.9rem;
+          background: #080c12;
+          border-top: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .note-full-text {
+          margin: 0;
+          font-family: var(--font-mono);
           font-size: 0.78rem;
+          line-height: 1.6;
+          color: #cbd5e1;
+          white-space: pre-wrap;
+          word-break: break-word;
         }
 
         .empty-logs {
-          padding: 1.5rem;
+          padding: 2rem 1rem;
           text-align: center;
           display: flex;
           flex-direction: column;
           align-items: center;
           gap: 0.4rem;
           color: var(--text-muted);
-          font-size: 0.76rem;
+          font-size: 0.78rem;
         }
 
         .empty-icon {
           opacity: 0.4;
+        }
+
+        @media (max-width: 768px) {
+          .activity-header {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+          .log-stream-row {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+          .note-row-main {
+            flex-direction: column;
+            align-items: flex-start;
+          }
         }
       `}</style>
     </div>
@@ -2801,199 +3406,6 @@ export const AddEditLinkModal: React.FC = () => {
 
 
 ================================================================================
-FILE: src/components/AddEditRevisionModal.tsx
-================================================================================
-'use client';
-
-import React, { useState } from 'react';
-import { useDrishti } from '@/context/DrishtiContext';
-import { RevisionCategory } from '@/types';
-import { X, Check, Brain } from 'lucide-react';
-
-export const AddEditRevisionModal: React.FC = () => {
-  const { isAddRevisionModalOpen, setIsAddRevisionModalOpen, addRevisionCard } = useDrishti();
-
-  const [title, setTitle] = useState('');
-  const [linkOrSummary, setLinkOrSummary] = useState('');
-  const [category, setCategory] = useState<RevisionCategory>('AI & Deep Learning');
-
-  if (!isAddRevisionModalOpen) return null;
-
-  const handleClose = () => {
-    setIsAddRevisionModalOpen(false);
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim() || !linkOrSummary.trim()) return;
-
-    addRevisionCard(title.trim(), linkOrSummary.trim(), category);
-    setTitle('');
-    setLinkOrSummary('');
-    handleClose();
-  };
-
-  return (
-    <div className="modal-backdrop" onClick={handleClose}>
-      <div className="modal-content bento-card" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <div className="modal-title-group">
-            <div className="modal-icon-badge">
-              <Brain size={18} />
-            </div>
-            <div>
-              <h2 className="modal-title">Add Active Recall Flashcard</h2>
-              <p className="modal-subtitle">Quick question and answer/docs link</p>
-            </div>
-          </div>
-          <button onClick={handleClose} className="btn-icon">
-            <X size={16} />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="modal-form">
-          <div className="form-group">
-            <label className="input-label">Question / Concept Title</label>
-            <input
-              type="text"
-              className="text-input"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. How does FlashAttention achieve speedup?"
-              required
-              autoFocus
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="input-label">Answer / Formula / Notes Link</label>
-            <textarea
-              className="textarea-input"
-              value={linkOrSummary}
-              onChange={(e) => setLinkOrSummary(e.target.value)}
-              placeholder="e.g. Tiling Q, K, V blocks in SRAM to minimize HBM IO access, or paste Google Doc link"
-              rows={3}
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="input-label">Category</label>
-            <select
-              className="select-input"
-              value={category}
-              onChange={(e) => setCategory(e.target.value as RevisionCategory)}
-            >
-              <option value="AI & Deep Learning">AI & Deep Learning</option>
-              <option value="System Design">System Design</option>
-              <option value="DSA & Algorithms">DSA & Algorithms</option>
-              <option value="Python & Backend">Python & Backend</option>
-              <option value="Spiritual Wisdom">Spiritual Wisdom</option>
-            </select>
-          </div>
-
-          <div className="modal-footer">
-            <button type="button" onClick={handleClose} className="btn-secondary">
-              Cancel
-            </button>
-            <button type="submit" className="btn-primary">
-              <Check size={16} />
-              <span>Add Flashcard</span>
-            </button>
-          </div>
-        </form>
-      </div>
-
-      <style jsx>{`
-        .modal-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 1.2rem 1.4rem;
-          border-bottom: 1px solid var(--border-subtle);
-        }
-
-        .modal-title-group {
-          display: flex;
-          align-items: center;
-          gap: 0.8rem;
-        }
-
-        .modal-icon-badge {
-          width: 36px;
-          height: 36px;
-          border-radius: 10px;
-          background: rgba(168, 85, 247, 0.18);
-          color: var(--accent-tertiary);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .modal-title {
-          font-size: 1.15rem;
-          font-weight: 700;
-          color: var(--text-primary);
-        }
-
-        .modal-subtitle {
-          font-size: 0.74rem;
-          color: var(--text-muted);
-        }
-
-        .modal-form {
-          padding: 1.4rem;
-          display: flex;
-          flex-direction: column;
-          gap: 1rem;
-        }
-
-        .form-group {
-          display: flex;
-          flex-direction: column;
-          gap: 0.3rem;
-        }
-
-        .input-label {
-          font-size: 0.8rem;
-          font-weight: 600;
-          color: var(--text-secondary);
-        }
-
-        .text-input,
-        .textarea-input,
-        .select-input {
-          background: var(--bg-input);
-          border: 1px solid var(--border-card);
-          border-radius: 10px;
-          color: var(--text-primary);
-          padding: 0.6rem 0.85rem;
-          font-size: 0.88rem;
-          outline: none;
-        }
-
-        .text-input:focus,
-        .textarea-input:focus,
-        .select-input:focus {
-          border-color: var(--accent-primary);
-          box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
-        }
-
-        .modal-footer {
-          display: flex;
-          align-items: center;
-          justify-content: flex-end;
-          gap: 0.75rem;
-          padding-top: 0.85rem;
-          border-top: 1px solid var(--border-subtle);
-        }
-      `}</style>
-    </div>
-  );
-};
-
-
-================================================================================
 FILE: src/components/CommandPaletteModal.tsx
 ================================================================================
 'use client';
@@ -3003,13 +3415,11 @@ import { useDrishti } from '@/context/DrishtiContext';
 import {
   Search,
   ExternalLink,
-  BookOpen,
-  Palette,
   Plus,
   Compass,
-  X,
+  Mic,
   ArrowRight,
-  Layers,
+  FolderKanban,
 } from 'lucide-react';
 
 export const CommandPaletteModal: React.FC = () => {
@@ -3017,10 +3427,9 @@ export const CommandPaletteModal: React.FC = () => {
     isCommandPaletteOpen,
     setIsCommandPaletteOpen,
     links,
-    revisionCards,
-    setTheme,
+    masterTiles,
+    setActiveTileId,
     setIsAddLinkModalOpen,
-    setIsAddRevisionModalOpen,
     recordLinkClick,
   } = useDrishti();
 
@@ -3040,14 +3449,14 @@ export const CommandPaletteModal: React.FC = () => {
     (l) =>
       l.title.toLowerCase().includes(query.toLowerCase()) ||
       l.url.toLowerCase().includes(query.toLowerCase()) ||
-      l.tags.some((t) => t.toLowerCase().includes(query.toLowerCase()))
+      l.tags?.some((t) => t.toLowerCase().includes(query.toLowerCase())) ||
+      l.description?.toLowerCase().includes(query.toLowerCase())
   );
 
-  const filteredRev = revisionCards.filter(
-    (r) =>
-      r.question.toLowerCase().includes(query.toLowerCase()) ||
-      r.category.toLowerCase().includes(query.toLowerCase()) ||
-      r.tags.some((t) => t.toLowerCase().includes(query.toLowerCase()))
+  const filteredHubs = masterTiles.filter(
+    (h) =>
+      h.title.toLowerCase().includes(query.toLowerCase()) ||
+      h.subtitle.toLowerCase().includes(query.toLowerCase())
   );
 
   return (
@@ -3058,7 +3467,7 @@ export const CommandPaletteModal: React.FC = () => {
           <Search size={18} className="search-icon" />
           <input
             type="text"
-            placeholder="Type a command, search deep-links, or find revision topics..."
+            placeholder="Type a command, search links, docs, or jump to any hub..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="palette-input"
@@ -3082,33 +3491,62 @@ export const CommandPaletteModal: React.FC = () => {
               }}
             >
               <Plus size={15} className="item-icon-cyan" />
-              <span>Add New Deep Link</span>
+              <span>Add New Link / Google Doc</span>
               <span className="item-badge">Action</span>
             </div>
+
             <div
               className="palette-item"
               onClick={() => {
                 handleClose();
-                setIsAddRevisionModalOpen(true);
+                setActiveTileId(null);
+                setTimeout(() => {
+                  const el = document.getElementById('daily-voice-journal-section');
+                  if (el) el.scrollIntoView({ behavior: 'smooth' });
+                }, 50);
               }}
             >
-              <BookOpen size={15} className="item-icon-purple" />
-              <span>Create SDE / AI Flashcard</span>
-              <span className="item-badge">Action</span>
+              <Mic size={15} className="item-icon-purple" />
+              <span>Open Daily Voice Journal & Dictation</span>
+              <span className="item-badge">Voice</span>
             </div>
           </div>
 
-          {/* Matching Links */}
+          {/* Matching Master Hubs */}
+          {filteredHubs.length > 0 && (
+            <div className="section-group">
+              <span className="section-label">FOCUS & LEARNING HUBS</span>
+              {filteredHubs.slice(0, 4).map((hub) => (
+                <div
+                  key={hub.id}
+                  className="palette-item"
+                  onClick={() => {
+                    setActiveTileId(hub.id);
+                    handleClose();
+                  }}
+                >
+                  <FolderKanban size={15} style={{ color: hub.colorAccent }} />
+                  <div className="item-text-group">
+                    <span className="item-title">{hub.title}</span>
+                    <span className="item-sub">{hub.subtitle}</span>
+                  </div>
+                  <ArrowRight size={13} className="ext-icon" />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Matching Links & Documents */}
           {filteredLinks.length > 0 && (
             <div className="section-group">
-              <span className="section-label">DIRECT DEEP LINKS</span>
-              {filteredLinks.slice(0, 6).map((link) => (
+              <span className="section-label">DIRECT DEEP LINKS & DOCS</span>
+              {filteredLinks.slice(0, 8).map((link) => (
                 <div
                   key={link.id}
                   className="palette-item"
                   onClick={() => {
                     recordLinkClick(link.id);
-                    window.open(link.url, '_blank');
+                    window.open(link.url, '_blank', 'noopener,noreferrer');
                     handleClose();
                   }}
                 >
@@ -3118,29 +3556,6 @@ export const CommandPaletteModal: React.FC = () => {
                     <span className="item-sub">{link.url}</span>
                   </div>
                   <ExternalLink size={13} className="ext-icon" />
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Matching Revision Cards */}
-          {filteredRev.length > 0 && (
-            <div className="section-group">
-              <span className="section-label">REVISION FLASHCARDS</span>
-              {filteredRev.slice(0, 4).map((card) => (
-                <div
-                  key={card.id}
-                  className="palette-item"
-                  onClick={() => {
-                    handleClose();
-                  }}
-                >
-                  <BookOpen size={15} className="item-icon-amber" />
-                  <div className="item-text-group">
-                    <span className="item-title">{card.question}</span>
-                    <span className="item-sub">[{card.category}] • {card.difficulty}</span>
-                  </div>
-                  <ArrowRight size={13} className="ext-icon" />
                 </div>
               ))}
             </div>
@@ -3248,15 +3663,11 @@ export const CommandPaletteModal: React.FC = () => {
         }
 
         .item-icon-purple {
-          color: var(--accent-tertiary);
+          color: #c084fc;
         }
 
         .item-icon-blue {
           color: #60a5fa;
-        }
-
-        .item-icon-amber {
-          color: #f59e0b;
         }
 
         .item-badge {
@@ -3303,436 +3714,446 @@ export const CommandPaletteModal: React.FC = () => {
 
 
 ================================================================================
-FILE: src/components/CourseDocTree.tsx
+FILE: src/components/DailyVoiceNotesCard.tsx
 ================================================================================
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useDrishti } from '@/context/DrishtiContext';
-import { CourseTreeNode } from '@/types';
+import { useSpeechToText } from '@/hooks/useSpeechToText';
 import {
-  FolderTree,
-  FileText,
-  ExternalLink,
-  Plus,
-  Trash2,
-  Edit3,
+  Mic,
+  MicOff,
+  Download,
+  Copy,
   Check,
-  X,
-  ChevronRight,
-  ChevronDown,
-  Layers,
+  Trash2,
+  Calendar,
+  Clock,
+  History,
+  FileText,
   Sparkles,
-  BookOpen,
-  Folder,
+  Volume2,
+  AlertCircle,
+  Archive,
+  ChevronDown,
+  ChevronUp,
+  Plus,
 } from 'lucide-react';
 
-export const CourseDocTree: React.FC = () => {
+export const DailyVoiceNotesCard: React.FC = () => {
   const {
-    treeNodes,
-    activeTileId,
-    activeSubTrack,
-    addTreeNode,
-    updateTreeNode,
-    deleteTreeNodeCascade,
-    logActivity,
+    dailyVoiceNotes,
+    todayVoiceEntry,
+    appendVoiceNote,
+    updateDailyVoiceNote,
+    deleteDailyVoiceNote,
+    downloadVoiceNoteFile,
+    exportAllVoiceNotes,
   } = useDrishti();
 
-  const [isAddingNode, setIsAddingNode] = useState(false);
-  const [newCode, setNewCode] = useState('');
-  const [newTitle, setNewTitle] = useState('');
-  const [newUrl, setNewUrl] = useState('');
+  const [copiedDay, setCopiedDay] = useState<string | null>(null);
+  const [selectedDayKey, setSelectedDayKey] = useState<string>('');
+  const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false);
+  const [manualNoteText, setManualNoteText] = useState<string>('');
+  const [isAddingManual, setIsAddingManual] = useState<boolean>(false);
+  const [expandedPastDays, setExpandedPastDays] = useState<Record<string, boolean>>({});
 
-  // Inline editing state
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editCode, setEditCode] = useState('');
-  const [editTitle, setEditTitle] = useState('');
-  const [editUrl, setEditUrl] = useState('');
-
-  // Collapsed branches state
-  const [collapsedCodes, setCollapsedCodes] = useState<Set<string>>(new Set());
-
-  const currentTileId = activeTileId || 'ai';
-
-  // Filter nodes for the current active tile and active subtrack
-  const currentNodes = treeNodes
-    .filter(
-      (n) =>
-        n.masterTileId === currentTileId &&
-        (!activeSubTrack || n.subTrack === activeSubTrack)
-    )
-    .sort((a, b) => {
-      const parseCode = (c: string) =>
-        c
-          .replace(/\.$/, '')
-          .split('.')
-          .map((part) => parseInt(part, 10) || 0);
-
-      const aParts = parseCode(a.code);
-      const bParts = parseCode(b.code);
-      const maxLen = Math.max(aParts.length, bParts.length);
-
-      for (let i = 0; i < maxLen; i++) {
-        const aVal = aParts[i] ?? -1;
-        const bVal = bParts[i] ?? -1;
-        if (aVal !== bVal) return aVal - bVal;
+  // Initialize Speech-to-text hook
+  const {
+    isListening,
+    transcript,
+    interimTranscript,
+    fullLiveTranscript,
+    error: speechError,
+    isSupported,
+    startListening,
+    stopListening,
+    resetTranscript,
+  } = useSpeechToText({
+    onFinalTranscript: (finalText) => {
+      if (finalText.trim()) {
+        appendVoiceNote(finalText);
       }
-      return a.code.localeCompare(b.code);
-    });
+    },
+  });
 
-  // Calculate level of depth based on dot count in code (e.g. "1." -> 0, "1.1" -> 1, "1.1.1" -> 2)
-  const getNodeDepth = (code: string) => {
-    const clean = code.trim().replace(/\.$/, '');
-    if (!clean.includes('.')) return 0;
-    return clean.split('.').length - 1;
-  };
+  const todayKey = new Date().toISOString().split('T')[0];
+  const activeDayKey = selectedDayKey || todayKey;
 
-  const handleToggleCollapse = (code: string) => {
-    setCollapsedCodes((prev) => {
-      const next = new Set(prev);
-      if (next.has(code)) next.delete(code);
-      else next.add(code);
-      return next;
-    });
-  };
+  const currentDisplayEntry =
+    dailyVoiceNotes.find((n) => n.dateKey === activeDayKey) || todayVoiceEntry;
 
-  const isNodeHiddenByParent = (code: string) => {
-    const clean = code.trim().replace(/\.$/, '');
-    const collapsedArray = Array.from(collapsedCodes);
-    for (let i = 0; i < collapsedArray.length; i++) {
-      const cleanCollapsed = collapsedArray[i].trim().replace(/\.$/, '');
-      if (clean.startsWith(`${cleanCollapsed}.`)) {
-        return true;
+  const todayHeading = new Date().toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+
+  const handleToggleListening = () => {
+    if (isListening) {
+      // Stopping: will append recorded transcript
+      const textToAppend = transcript.trim() || interimTranscript.trim();
+      stopListening();
+      if (textToAppend) {
+        appendVoiceNote(textToAppend);
+        resetTranscript();
       }
-    }
-    return false;
-  };
-
-  const handleOpenDoc = (node: CourseTreeNode) => {
-    logActivity(`${node.code} ${node.title}`, node.url, `${node.masterTileId} / ${node.subTrack}`, 'doc_tree');
-    window.open(node.url, '_blank', 'noopener,noreferrer');
-  };
-
-  const handleAddSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTitle.trim() || !newUrl.trim()) return;
-
-    let autoCode = newCode.trim();
-    if (!autoCode) {
-      autoCode = `${currentNodes.length + 1}.`;
-    }
-
-    addTreeNode(autoCode, newTitle.trim(), newUrl.trim(), currentTileId, activeSubTrack);
-    setNewCode('');
-    setNewTitle('');
-    setNewUrl('');
-    setIsAddingNode(false);
-  };
-
-  const handleStartEdit = (node: CourseTreeNode) => {
-    setEditingId(node.id);
-    setEditCode(node.code);
-    setEditTitle(node.title);
-    setEditUrl(node.url);
-  };
-
-  const handleSaveEdit = (id: string) => {
-    if (!editTitle.trim() || !editUrl.trim()) return;
-    updateTreeNode(id, {
-      code: editCode.trim(),
-      title: editTitle.trim(),
-      url: editUrl.trim(),
-    });
-    setEditingId(null);
-  };
-
-  const handleDeleteCascade = (id: string, code: string, title: string) => {
-    if (
-      confirm(
-        `Delete "${code} ${title}" and ALL its sub-child notes from both tree and boxes?`
-      )
-    ) {
-      deleteTreeNodeCascade(id);
+    } else {
+      resetTranscript();
+      startListening();
     }
   };
+
+  const handleManualAdd = () => {
+    if (!manualNoteText.trim()) return;
+    appendVoiceNote(manualNoteText.trim());
+    setManualNoteText('');
+    setIsAddingManual(false);
+  };
+
+  const handleCopyContent = (content: string, dateKey: string) => {
+    navigator.clipboard.writeText(content);
+    setCopiedDay(dateKey);
+    setTimeout(() => setCopiedDay(null), 2000);
+  };
+
+  const togglePastDayExpand = (key: string) => {
+    setExpandedPastDays((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const pastDays = dailyVoiceNotes.filter((n) => n.dateKey !== todayKey);
 
   return (
-    <div className="bento-card course-tree-container">
+    <div className="bento-card voice-notes-container">
       {/* Header */}
-      <div className="tree-header">
-        <div className="tree-title-group">
-          <div className="tree-icon-box">
-            <FolderTree size={18} />
+      <div className="voice-header">
+        <div className="title-group">
+          <div className={`mic-status-icon ${isListening ? 'recording' : ''}`}>
+            {isListening ? <Volume2 size={18} /> : <Mic size={18} />}
           </div>
           <div>
-            <h3 className="tree-heading">
-              {activeSubTrack} • Notes Tree Hierarchy
-            </h3>
-            <p className="tree-subheading">
-              Hierarchical Google Docs notes with automatic multi-level numbering (e.g. 1., 1.1, 1.1.1)
+            <div className="title-row">
+              <h3 className="card-title">Daily Voice Journal & Audio Notes</h3>
+              <span className="retention-pill">
+                <Archive size={11} /> 14-Day Auto Retention
+              </span>
+            </div>
+            <p className="card-sub">
+              Audio-to-text dictation with automatic daily append & one-click text file export
             </p>
           </div>
         </div>
 
-        <button
-          onClick={() => setIsAddingNode(true)}
-          className="btn-primary add-node-top-btn"
-        >
-          <Plus size={14} />
-          <span>Add Doc to {activeSubTrack}</span>
-        </button>
+        <div className="header-actions">
+          {dailyVoiceNotes.length > 0 && (
+            <button
+              onClick={exportAllVoiceNotes}
+              className="btn-action-ghost"
+              title="Download all 14-day voice notes as combined text archive"
+            >
+              <Download size={13} />
+              <span>Export All 14 Days</span>
+            </button>
+          )}
+
+          {pastDays.length > 0 && (
+            <button
+              onClick={() => setShowHistoryModal(!showHistoryModal)}
+              className={`btn-action-ghost ${showHistoryModal ? 'active' : ''}`}
+              title="View past 14 days dictation archives"
+            >
+              <History size={13} />
+              <span>History ({pastDays.length})</span>
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Quick Add Form (Only Code, Title, Link) */}
-      {isAddingNode && (
-        <form onSubmit={handleAddSubmit} className="inline-add-node-box">
-          <div className="add-node-header">
-            <span className="add-form-title">
-              <Plus size={14} /> Add Note in <strong>{activeSubTrack}</strong>
-            </span>
-            <button
-              type="button"
-              onClick={() => setIsAddingNode(false)}
-              className="btn-icon mini-icon-btn"
-            >
-              <X size={13} />
-            </button>
-          </div>
+      {/* Main Dictation Controls Bar */}
+      <div className={`dictation-bar ${isListening ? 'active-listening' : ''}`}>
+        <div className="mic-action-area">
+          <button
+            onClick={handleToggleListening}
+            className={`btn-mic-record ${isListening ? 'pulse-active' : ''}`}
+            title={isListening ? 'Click to Stop & Append' : 'Click to Start Voice Recording'}
+          >
+            {isListening ? (
+              <>
+                <div className="soundwaves">
+                  <span className="wave bar1"></span>
+                  <span className="wave bar2"></span>
+                  <span className="wave bar3"></span>
+                  <span className="wave bar4"></span>
+                  <span className="wave bar5"></span>
+                </div>
+                <span className="mic-btn-label">Stop & Save Note</span>
+              </>
+            ) : (
+              <>
+                <Mic size={18} className="mic-icon" />
+                <span className="mic-btn-label">Tap to Speak / Dictate</span>
+              </>
+            )}
+          </button>
 
-          <div className="add-node-inputs">
-            <input
-              type="text"
-              placeholder="Number (e.g. 1.2 or 1.2.1)"
-              value={newCode}
-              onChange={(e) => setNewCode(e.target.value)}
-              className="node-input code-input"
-            />
-            <input
-              type="text"
-              placeholder="Note Title (e.g. Scaled Dot-Product Attention)"
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              className="node-input title-input"
-              required
-              autoFocus
-            />
-            <input
-              type="url"
-              placeholder="Google Docs Link (https://docs.google.com/...)"
-              value={newUrl}
-              onChange={(e) => setNewUrl(e.target.value)}
-              className="node-input url-input"
-              required
-            />
-            <button type="submit" className="btn-primary save-node-btn">
-              <Check size={14} />
-              <span>Add to Tree & Boxes</span>
-            </button>
-          </div>
-        </form>
-      )}
-
-      {/* ================= 1. VISUAL TREE NAVIGATOR ================= */}
-      <div className="tree-visual-panel">
-        <div className="panel-label">
-          <Layers size={13} />
-          <span>HIERARCHICAL TREE EXPLORER</span>
+          <button
+            onClick={() => setIsAddingManual(!isAddingManual)}
+            className="btn-manual-add"
+            title="Type a quick manual note instead of voice"
+          >
+            <Plus size={14} />
+            <span>Type Note</span>
+          </button>
         </div>
 
-        {currentNodes.length > 0 ? (
-          <div className="tree-nodes-list">
-            {currentNodes.map((node) => {
-              if (isNodeHiddenByParent(node.code)) return null;
+        {/* Live Audio Status */}
+        <div className="live-status-info">
+          {isListening ? (
+            <div className="recording-status">
+              <span className="red-pulse-dot"></span>
+              <span className="live-status-text">
+                Listening in real-time... Speak into your microphone
+              </span>
+            </div>
+          ) : (
+            <div className="idle-status">
+              <Sparkles size={13} color="#a855f7" />
+              <span className="idle-status-text">
+                Tap the mic anytime today — notes automatically append below
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
 
-              const depth = getNodeDepth(node.code);
-              const isCollapsed = collapsedCodes.has(node.code);
-              const isEditing = editingId === node.id;
+      {/* Live Stream Transcript Preview (When Recording) */}
+      {isListening && (
+        <div className="live-stream-preview">
+          <div className="stream-header">
+            <span className="stream-label">🎙️ Live Voice Transcription:</span>
+          </div>
+          <p className="stream-text">
+            {fullLiveTranscript || (
+              <span className="stream-placeholder">Say something... your voice will appear here live...</span>
+            )}
+          </p>
+        </div>
+      )}
 
-              return (
-                <div
-                  key={node.id}
-                  className={`tree-node-item depth-${Math.min(depth, 3)}`}
-                  style={{ paddingLeft: `${depth * 1.5 + 0.6}rem` }}
+      {/* Speech Error Warning */}
+      {speechError && (
+        <div className="speech-error-box">
+          <AlertCircle size={14} />
+          <span>{speechError}</span>
+        </div>
+      )}
+
+      {!isSupported && (
+        <div className="speech-error-box">
+          <AlertCircle size={14} />
+          <span>Web Speech API is not supported in this browser. Please use Google Chrome, Edge, Safari, or Brave.</span>
+        </div>
+      )}
+
+      {/* Manual Add Input Box */}
+      {isAddingManual && (
+        <div className="manual-input-wrap">
+          <textarea
+            value={manualNoteText}
+            onChange={(e) => setManualNoteText(e.target.value)}
+            placeholder="Type your notes or insights for today here..."
+            className="manual-textarea"
+            rows={3}
+          />
+          <div className="manual-btn-row">
+            <button onClick={() => setIsAddingManual(false)} className="btn-cancel-sm">
+              Cancel
+            </button>
+            <button onClick={handleManualAdd} className="btn-save-sm">
+              Append to Today
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Today's Active Note Sheet */}
+      <div className="today-sheet-container">
+        <div className="sheet-top-meta">
+          <div className="sheet-date-title">
+            <Calendar size={15} color="#38bdf8" />
+            <span className="sheet-heading-text">
+              {currentDisplayEntry ? currentDisplayEntry.fullDateHeading : todayHeading}
+            </span>
+            {currentDisplayEntry && (
+              <span className="sessions-badge">
+                {currentDisplayEntry.sessionsCount} {currentDisplayEntry.sessionsCount === 1 ? 'session' : 'sessions'}
+              </span>
+            )}
+          </div>
+
+          <div className="sheet-actions">
+            {currentDisplayEntry && (
+              <>
+                <button
+                  onClick={() => downloadVoiceNoteFile(currentDisplayEntry.dateKey)}
+                  className="btn-icon-pill"
+                  title="Download this day's notes as a .txt file"
                 >
-                  {/* Tree branch guide */}
-                  <div className="tree-branch-guide" />
+                  <Download size={13} />
+                  <span>Download .txt</span>
+                </button>
 
-                  {/* Node icon / folder */}
-                  {depth === 0 ? (
-                    <button
-                      type="button"
-                      onClick={() => handleToggleCollapse(node.code)}
-                      className="collapse-toggle-btn"
-                    >
-                      {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                      <Folder size={15} className="folder-icon" />
-                    </button>
+                <button
+                  onClick={() => handleCopyContent(currentDisplayEntry.content, currentDisplayEntry.dateKey)}
+                  className="btn-icon-pill"
+                  title="Copy day's notes to clipboard"
+                >
+                  {copiedDay === currentDisplayEntry.dateKey ? (
+                    <>
+                      <Check size={13} color="#10b981" />
+                      <span style={{ color: '#10b981' }}>Copied!</span>
+                    </>
                   ) : (
-                    <div className="doc-icon-badge">
-                      <FileText size={14} className="doc-icon" />
-                    </div>
+                    <>
+                      <Copy size={13} />
+                      <span>Copy</span>
+                    </>
                   )}
+                </button>
 
-                  {/* Node Content / Inline Edit */}
-                  {isEditing ? (
-                    <div className="node-inline-edit-form">
-                      <input
-                        type="text"
-                        value={editCode}
-                        onChange={(e) => setEditCode(e.target.value)}
-                        className="inline-code-edit"
-                      />
-                      <input
-                        type="text"
-                        value={editTitle}
-                        onChange={(e) => setEditTitle(e.target.value)}
-                        className="inline-title-edit"
-                      />
-                      <input
-                        type="url"
-                        value={editUrl}
-                        onChange={(e) => setEditUrl(e.target.value)}
-                        className="inline-url-edit"
-                      />
+                <button
+                  onClick={() => {
+                    if (confirm(`Delete notes for ${currentDisplayEntry.fullDateHeading}?`)) {
+                      deleteDailyVoiceNote(currentDisplayEntry.id);
+                    }
+                  }}
+                  className="btn-icon-pill danger"
+                  title="Delete this day's notes"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Content Area */}
+        <div className="sheet-body">
+          {currentDisplayEntry ? (
+            <textarea
+              value={currentDisplayEntry.content}
+              onChange={(e) => updateDailyVoiceNote(currentDisplayEntry.id, e.target.value)}
+              className="sheet-textarea"
+              placeholder="Your voice transcripts for today will appear here..."
+              spellCheck={false}
+            />
+          ) : (
+            <div className="sheet-empty-state">
+              <div className="empty-mic-circle">
+                <Mic size={24} color="#64748b" />
+              </div>
+              <p className="empty-title">No voice notes recorded yet for today</p>
+              <p className="empty-sub">
+                Click <strong>&quot;Tap to Speak / Dictate&quot;</strong> above to record your first thought, algorithm, or insight.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 14-Day History Section / Past Days Accordion */}
+      {showHistoryModal && pastDays.length > 0 && (
+        <div className="history-drawer">
+          <div className="history-header">
+            <div className="history-title-row">
+              <History size={15} color="#a855f7" />
+              <h4>14-Day Voice Archive (Previous Days)</h4>
+            </div>
+            <span className="history-info-badge">Auto-purges after 2 weeks</span>
+          </div>
+
+          <div className="past-days-list">
+            {pastDays.map((entry) => {
+              const isExpanded = expandedPastDays[entry.dateKey];
+              return (
+                <div key={entry.id} className="past-day-card">
+                  <div className="past-day-header" onClick={() => togglePastDayExpand(entry.dateKey)}>
+                    <div className="past-day-meta">
+                      <FileText size={14} color="#38bdf8" />
+                      <span className="past-day-title">{entry.fullDateHeading}</span>
+                      <span className="past-sessions-pill">{entry.sessionsCount} sessions</span>
+                    </div>
+
+                    <div className="past-day-ctrls" onClick={(e) => e.stopPropagation()}>
                       <button
-                        type="button"
-                        onClick={() => handleSaveEdit(node.id)}
-                        className="btn-primary mini-btn"
+                        onClick={() => downloadVoiceNoteFile(entry.dateKey)}
+                        className="btn-past-action"
+                        title="Download .txt"
                       >
-                        <Check size={12} />
+                        <Download size={12} />
+                        <span>.txt</span>
                       </button>
+
                       <button
-                        type="button"
-                        onClick={() => setEditingId(null)}
-                        className="btn-secondary mini-btn"
+                        onClick={() => handleCopyContent(entry.content, entry.dateKey)}
+                        className="btn-past-action"
+                        title="Copy"
                       >
-                        <X size={12} />
+                        {copiedDay === entry.dateKey ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          if (confirm(`Delete archive for ${entry.fullDateHeading}?`)) {
+                            deleteDailyVoiceNote(entry.id);
+                          }
+                        }}
+                        className="btn-past-action danger"
+                        title="Delete Day"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+
+                      <button
+                        onClick={() => togglePastDayExpand(entry.dateKey)}
+                        className="btn-past-action toggle"
+                      >
+                        {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                       </button>
                     </div>
-                  ) : (
-                    <div className="node-content-row">
-                      <span className="node-code-badge">{node.code}</span>
-                      <span
-                        className="node-title-clickable"
-                        onClick={() => handleOpenDoc(node)}
-                        title={`Open Google Doc: ${node.url}`}
-                      >
-                        {node.title}
-                      </span>
+                  </div>
 
-                      <div className="node-hover-actions">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenDoc(node)}
-                          className="action-btn open-doc-btn"
-                          title="Open Google Doc"
-                        >
-                          <ExternalLink size={13} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleStartEdit(node)}
-                          className="action-btn edit-node-btn"
-                          title="Edit Code, Title or Link"
-                        >
-                          <Edit3 size={13} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteCascade(node.id, node.code, node.title)}
-                          className="action-btn delete-node-btn"
-                          title="Delete node and all children"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
+                  {isExpanded && (
+                    <div className="past-day-content-wrap">
+                      <textarea
+                        value={entry.content}
+                        onChange={(e) => updateDailyVoiceNote(entry.id, e.target.value)}
+                        className="past-day-textarea"
+                        rows={6}
+                      />
                     </div>
                   )}
                 </div>
               );
             })}
           </div>
-        ) : (
-          <div className="empty-tree-state">
-            <FileText size={32} className="empty-tree-icon" />
-            <p>No notes or docs added to <strong>{activeSubTrack}</strong> yet.</p>
-            <button
-              onClick={() => setIsAddingNode(true)}
-              className="btn-primary mini-add-btn"
-            >
-              <Plus size={13} />
-              <span>Add First Doc (e.g. 1. Intro)</span>
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* ================= 2. STRUCTURED BELOW-TREE BOX GRID ================= */}
-      <div className="below-tree-boxes-panel">
-        <div className="panel-label">
-          <Layers size={13} />
-          <span>DOCUMENT TILES FOR {activeSubTrack.toUpperCase()}</span>
         </div>
-
-        <div className="doc-boxes-grid">
-          {currentNodes.map((node) => (
-            <div key={node.id} className="doc-tile-card bento-card">
-              <div className="tile-top-row">
-                <span className="tile-code">{node.code}</span>
-                <div className="tile-actions">
-                  <button
-                    onClick={() => handleStartEdit(node)}
-                    className="tile-action-btn"
-                    title="Edit Note"
-                  >
-                    <Edit3 size={13} />
-                  </button>
-                  <button
-                    onClick={() => handleDeleteCascade(node.id, node.code, node.title)}
-                    className="tile-action-btn delete-btn"
-                    title="Delete Note"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-
-              <h4 className="tile-title">{node.title}</h4>
-              <p className="tile-url-preview">{node.url}</p>
-
-              <div className="tile-footer">
-                <span className="course-badge">{node.subTrack}</span>
-                <button
-                  onClick={() => handleOpenDoc(node)}
-                  className="open-doc-tile-btn"
-                >
-                  <span>Open Doc</span>
-                  <ExternalLink size={12} />
-                </button>
-              </div>
-            </div>
-          ))}
-
-          {/* Quick Add Tile */}
-          <div
-            className="add-doc-tile-placeholder bento-card"
-            onClick={() => setIsAddingNode(true)}
-          >
-            <Plus size={20} className="plus-icon" />
-            <span>Add Note to {activeSubTrack}</span>
-          </div>
-        </div>
-      </div>
+      )}
 
       <style jsx>{`
-        .course-tree-container {
-          padding: 1.4rem;
+        .voice-notes-container {
+          padding: 1.25rem;
           display: flex;
           flex-direction: column;
-          gap: 1.25rem;
+          gap: 1rem;
+          background: var(--bg-surface);
+          border: 1px solid var(--border-card);
+          border-radius: 16px;
         }
 
-        .tree-header {
+        .voice-header {
           display: flex;
           align-items: center;
           justify-content: space-between;
@@ -3740,408 +4161,621 @@ export const CourseDocTree: React.FC = () => {
           gap: 0.75rem;
         }
 
-        .tree-title-group {
+        .title-group {
           display: flex;
           align-items: center;
-          gap: 0.85rem;
+          gap: 0.75rem;
         }
 
-        .tree-icon-box {
+        .mic-status-icon {
           width: 38px;
           height: 38px;
           border-radius: 10px;
-          background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(168, 85, 247, 0.2));
-          border: 1px solid var(--border-hover);
-          color: var(--accent-primary);
+          background: rgba(168, 85, 247, 0.12);
+          color: #a855f7;
           display: flex;
           align-items: center;
           justify-content: center;
+          transition: all 0.3s ease;
         }
 
-        .tree-heading {
-          font-size: 1.2rem;
-          font-weight: 800;
+        .mic-status-icon.recording {
+          background: rgba(239, 68, 68, 0.2);
+          color: #ef4444;
+          animation: pulseIcon 1.5s infinite;
+        }
+
+        @keyframes pulseIcon {
+          0% { transform: scale(1); }
+          50% { transform: scale(1.08); }
+          100% { transform: scale(1); }
+        }
+
+        .title-row {
+          display: flex;
+          align-items: center;
+          gap: 0.6rem;
+          flex-wrap: wrap;
+        }
+
+        .card-title {
+          font-size: 1.05rem;
+          font-weight: 700;
           color: var(--text-primary);
-          letter-spacing: -0.02em;
         }
 
-        .tree-subheading {
+        .retention-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.25rem;
+          background: rgba(56, 189, 248, 0.1);
+          color: #38bdf8;
+          border: 1px solid rgba(56, 189, 248, 0.25);
+          font-size: 0.68rem;
+          font-weight: 600;
+          padding: 0.15rem 0.45rem;
+          border-radius: 6px;
+        }
+
+        .card-sub {
+          font-size: 0.74rem;
+          color: var(--text-muted);
+          margin-top: 0.15rem;
+        }
+
+        .header-actions {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+
+        .btn-action-ghost {
+          background: var(--bg-surface-elevated);
+          border: 1px solid var(--border-card);
+          color: var(--text-secondary);
+          padding: 0.35rem 0.65rem;
+          border-radius: 8px;
+          font-size: 0.75rem;
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          gap: 0.35rem;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .btn-action-ghost:hover {
+          color: var(--text-primary);
+          border-color: rgba(255, 255, 255, 0.2);
+          background: rgba(255, 255, 255, 0.05);
+        }
+
+        .btn-action-ghost.active {
+          background: rgba(168, 85, 247, 0.15);
+          border-color: rgba(168, 85, 247, 0.4);
+          color: #c084fc;
+        }
+
+        /* Dictation Bar */
+        .dictation-bar {
+          background: rgba(15, 23, 42, 0.5);
+          border: 1px solid rgba(255, 255, 255, 0.06);
+          border-radius: 12px;
+          padding: 0.75rem 1rem;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 1rem;
+          flex-wrap: wrap;
+          transition: border-color 0.3s ease;
+        }
+
+        .dictation-bar.active-listening {
+          border-color: rgba(239, 68, 68, 0.4);
+          background: rgba(239, 68, 68, 0.04);
+        }
+
+        .mic-action-area {
+          display: flex;
+          align-items: center;
+          gap: 0.6rem;
+        }
+
+        .btn-mic-record {
+          background: linear-gradient(135deg, #7c3aed, #6366f1);
+          color: #ffffff;
+          border: none;
+          padding: 0.55rem 1.1rem;
+          border-radius: 10px;
+          font-size: 0.82rem;
+          font-weight: 700;
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          cursor: pointer;
+          box-shadow: 0 4px 14px rgba(124, 58, 237, 0.3);
+          transition: all 0.25s ease;
+        }
+
+        .btn-mic-record:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 6px 18px rgba(124, 58, 237, 0.45);
+        }
+
+        .btn-mic-record.pulse-active {
+          background: linear-gradient(135deg, #dc2626, #ef4444);
+          box-shadow: 0 0 20px rgba(239, 68, 68, 0.5);
+          animation: pulseBtn 1.5s infinite;
+        }
+
+        @keyframes pulseBtn {
+          0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+          70% { box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+
+        .soundwaves {
+          display: flex;
+          align-items: center;
+          gap: 3px;
+          height: 14px;
+        }
+
+        .wave {
+          display: block;
+          width: 3px;
+          background: #ffffff;
+          border-radius: 2px;
+          animation: soundWave 1.2s infinite ease-in-out;
+        }
+
+        .bar1 { height: 6px; animation-delay: 0.1s; }
+        .bar2 { height: 12px; animation-delay: 0.2s; }
+        .bar3 { height: 16px; animation-delay: 0.3s; }
+        .bar4 { height: 10px; animation-delay: 0.4s; }
+        .bar5 { height: 5px; animation-delay: 0.5s; }
+
+        @keyframes soundWave {
+          0%, 100% { transform: scaleY(0.4); }
+          50% { transform: scaleY(1.4); }
+        }
+
+        .btn-manual-add {
+          background: var(--bg-surface-elevated);
+          border: 1px solid var(--border-card);
+          color: var(--text-secondary);
+          padding: 0.55rem 0.85rem;
+          border-radius: 10px;
+          font-size: 0.8rem;
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          gap: 0.35rem;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .btn-manual-add:hover {
+          color: var(--text-primary);
+          background: rgba(255, 255, 255, 0.06);
+        }
+
+        .live-status-info {
+          display: flex;
+          align-items: center;
+        }
+
+        .recording-status {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          color: #ef4444;
           font-size: 0.78rem;
+          font-weight: 600;
+        }
+
+        .red-pulse-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: #ef4444;
+          box-shadow: 0 0 8px #ef4444;
+          animation: pulseRed 1s infinite;
+        }
+
+        @keyframes pulseRed {
+          0% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.4; transform: scale(1.3); }
+          100% { opacity: 1; transform: scale(1); }
+        }
+
+        .idle-status {
+          display: flex;
+          align-items: center;
+          gap: 0.45rem;
+          font-size: 0.76rem;
           color: var(--text-muted);
         }
 
-        .inline-add-node-box {
+        /* Live Stream Preview */
+        .live-stream-preview {
+          background: rgba(168, 85, 247, 0.06);
+          border: 1px solid rgba(168, 85, 247, 0.25);
+          border-radius: 10px;
+          padding: 0.75rem 1rem;
+          animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(-4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        .stream-header {
+          font-size: 0.72rem;
+          font-weight: 700;
+          color: #c084fc;
+          margin-bottom: 0.35rem;
+        }
+
+        .stream-text {
+          font-size: 0.86rem;
+          line-height: 1.5;
+          color: #f1f5f9;
+          font-family: var(--font-mono);
+        }
+
+        .stream-placeholder {
+          color: var(--text-muted);
+          font-style: italic;
+        }
+
+        .speech-error-box {
+          background: rgba(239, 68, 68, 0.1);
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          color: #fca5a5;
+          padding: 0.5rem 0.85rem;
+          border-radius: 8px;
+          font-size: 0.76rem;
+          display: flex;
+          align-items: center;
+          gap: 0.45rem;
+        }
+
+        /* Manual Input Wrap */
+        .manual-input-wrap {
           background: var(--bg-surface-elevated);
-          border: 1px solid var(--border-hover);
+          border: 1px solid var(--border-card);
+          border-radius: 10px;
+          padding: 0.75rem;
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+        }
+
+        .manual-textarea {
+          width: 100%;
+          background: rgba(0, 0, 0, 0.3);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 8px;
+          padding: 0.6rem;
+          color: #e2e8f0;
+          font-size: 0.82rem;
+          font-family: var(--font-sans);
+          outline: none;
+          resize: vertical;
+        }
+
+        .manual-btn-row {
+          display: flex;
+          justify-content: flex-end;
+          gap: 0.5rem;
+        }
+
+        .btn-cancel-sm {
+          background: transparent;
+          border: 1px solid var(--border-card);
+          color: var(--text-muted);
+          padding: 0.3rem 0.7rem;
+          border-radius: 6px;
+          font-size: 0.75rem;
+          cursor: pointer;
+        }
+
+        .btn-save-sm {
+          background: #7c3aed;
+          border: none;
+          color: #ffffff;
+          padding: 0.3rem 0.75rem;
+          border-radius: 6px;
+          font-size: 0.75rem;
+          font-weight: 600;
+          cursor: pointer;
+        }
+
+        /* Today's Sheet */
+        .today-sheet-container {
+          background: #090d14;
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 12px;
+          padding: 0.9rem;
+          display: flex;
+          flex-direction: column;
+          gap: 0.65rem;
+          min-height: 200px;
+        }
+
+        .sheet-top-meta {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+          padding-bottom: 0.6rem;
+          flex-wrap: wrap;
+          gap: 0.5rem;
+        }
+
+        .sheet-date-title {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+
+        .sheet-heading-text {
+          font-size: 0.88rem;
+          font-weight: 700;
+          color: #f1f5f9;
+        }
+
+        .sessions-badge {
+          background: rgba(56, 189, 248, 0.1);
+          color: #38bdf8;
+          border: 1px solid rgba(56, 189, 248, 0.2);
+          font-size: 0.68rem;
+          padding: 0.1rem 0.4rem;
+          border-radius: 4px;
+          font-weight: 600;
+        }
+
+        .sheet-actions {
+          display: flex;
+          align-items: center;
+          gap: 0.4rem;
+        }
+
+        .btn-icon-pill {
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          color: var(--text-secondary);
+          padding: 0.25rem 0.55rem;
+          border-radius: 6px;
+          font-size: 0.72rem;
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          gap: 0.3rem;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .btn-icon-pill:hover {
+          color: var(--text-primary);
+          background: rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-icon-pill.danger:hover {
+          color: #ef4444;
+          border-color: rgba(239, 68, 68, 0.4);
+          background: rgba(239, 68, 68, 0.1);
+        }
+
+        .sheet-body {
+          flex: 1;
+          display: flex;
+        }
+
+        .sheet-textarea {
+          width: 100%;
+          min-height: 170px;
+          background: transparent;
+          border: none;
+          outline: none;
+          color: #e2e8f0;
+          font-family: var(--font-mono);
+          font-size: 0.84rem;
+          line-height: 1.6;
+          resize: vertical;
+        }
+
+        .sheet-empty-state {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+          padding: 2.5rem 1rem;
+          width: 100%;
+          gap: 0.4rem;
+        }
+
+        .empty-mic-circle {
+          width: 46px;
+          height: 46px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px dashed rgba(255, 255, 255, 0.12);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-bottom: 0.25rem;
+        }
+
+        .empty-title {
+          font-size: 0.88rem;
+          font-weight: 600;
+          color: var(--text-secondary);
+        }
+
+        .empty-sub {
+          font-size: 0.76rem;
+          color: var(--text-muted);
+          max-width: 420px;
+        }
+
+        /* History Drawer */
+        .history-drawer {
+          background: rgba(15, 23, 42, 0.6);
+          border: 1px solid rgba(255, 255, 255, 0.08);
           border-radius: 12px;
           padding: 0.85rem;
           display: flex;
           flex-direction: column;
-          gap: 0.65rem;
-        }
-
-        .add-node-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-        }
-
-        .add-form-title {
-          font-size: 0.82rem;
-          color: var(--accent-primary);
-          font-weight: 600;
-          display: flex;
-          align-items: center;
-          gap: 0.35rem;
-        }
-
-        .add-node-inputs {
-          display: flex;
-          gap: 0.5rem;
-          flex-wrap: wrap;
-        }
-
-        .node-input {
-          background: var(--bg-input);
-          border: 1px solid var(--border-card);
-          border-radius: 8px;
-          color: var(--text-primary);
-          padding: 0.45rem 0.65rem;
-          font-size: 0.82rem;
-          outline: none;
-        }
-
-        .code-input {
-          width: 130px;
-          font-family: var(--font-mono);
-          font-weight: 600;
-        }
-
-        .title-input {
-          flex: 1;
-          min-width: 200px;
-        }
-
-        .url-input {
-          flex: 1;
-          min-width: 220px;
-        }
-
-        .save-node-btn {
-          padding: 0.45rem 0.85rem;
-          font-size: 0.8rem;
-          white-space: nowrap;
-        }
-
-        .panel-label {
-          display: flex;
-          align-items: center;
-          gap: 0.4rem;
-          font-size: 0.72rem;
-          font-family: var(--font-mono);
-          font-weight: 700;
-          color: var(--accent-primary);
-          letter-spacing: 0.05em;
-          margin-bottom: 0.65rem;
-        }
-
-        .tree-visual-panel {
-          background: #090c14;
-          border: 1px solid var(--border-card);
-          border-radius: 12px;
-          padding: 1rem;
-          max-height: 420px;
-          overflow-y: auto;
-        }
-
-        .tree-nodes-list {
-          display: flex;
-          flex-direction: column;
-          gap: 0.35rem;
-        }
-
-        .tree-node-item {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          padding: 0.35rem 0.5rem;
-          border-radius: 8px;
-          position: relative;
-          transition: var(--transition-smooth);
-        }
-
-        .tree-node-item:hover {
-          background: rgba(255, 255, 255, 0.04);
-        }
-
-        .collapse-toggle-btn {
-          background: transparent;
-          border: none;
-          color: #f59e0b;
-          display: inline-flex;
-          align-items: center;
-          gap: 0.3rem;
-          cursor: pointer;
-          font-size: 0.8rem;
-        }
-
-        .doc-icon-badge {
-          display: inline-flex;
-          align-items: center;
-          color: var(--accent-primary);
-        }
-
-        .node-content-row {
-          display: flex;
-          align-items: center;
           gap: 0.6rem;
-          flex: 1;
+          animation: slideDown 0.25s ease;
         }
 
-        .node-code-badge {
-          font-family: var(--font-mono);
-          font-size: 0.76rem;
-          font-weight: 700;
-          color: var(--accent-secondary);
-          background: rgba(129, 140, 248, 0.15);
-          padding: 0.1rem 0.4rem;
-          border-radius: 4px;
+        @keyframes slideDown {
+          from { opacity: 0; transform: translateY(-6px); }
+          to { opacity: 1; transform: translateY(0); }
         }
 
-        .node-title-clickable {
-          font-size: 0.86rem;
-          font-weight: 500;
-          color: var(--text-primary);
-          cursor: pointer;
-          transition: var(--transition-smooth);
-        }
-
-        .node-title-clickable:hover {
-          color: var(--accent-primary);
-          text-decoration: underline;
-        }
-
-        .node-hover-actions {
-          margin-left: auto;
+        .history-header {
           display: flex;
           align-items: center;
-          gap: 0.3rem;
-          opacity: 0.4;
-          transition: var(--transition-smooth);
+          justify-content: space-between;
+          padding-bottom: 0.45rem;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         }
 
-        .tree-node-item:hover .node-hover-actions {
-          opacity: 1;
-        }
-
-        .action-btn {
-          background: transparent;
-          border: 1px solid transparent;
-          color: var(--text-muted);
-          width: 26px;
-          height: 26px;
-          border-radius: 6px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-        }
-
-        .action-btn:hover {
-          background: var(--bg-surface-elevated);
-          color: var(--text-primary);
-          border-color: var(--border-subtle);
-        }
-
-        .delete-node-btn:hover {
-          background: rgba(239, 68, 68, 0.15);
-          color: #ef4444;
-        }
-
-        .node-inline-edit-form {
+        .history-title-row {
           display: flex;
           align-items: center;
-          gap: 0.4rem;
-          flex: 1;
+          gap: 0.45rem;
         }
 
-        .inline-code-edit {
-          width: 90px;
-          background: var(--bg-input);
-          border: 1px solid var(--border-hover);
-          color: var(--text-primary);
-          padding: 0.25rem 0.45rem;
-          border-radius: 6px;
-          font-size: 0.78rem;
-          font-family: var(--font-mono);
-        }
-
-        .inline-title-edit,
-        .inline-url-edit {
-          flex: 1;
-          background: var(--bg-input);
-          border: 1px solid var(--border-hover);
-          color: var(--text-primary);
-          padding: 0.25rem 0.45rem;
-          border-radius: 6px;
-          font-size: 0.78rem;
-        }
-
-        .mini-btn {
-          padding: 0.25rem 0.5rem;
-          height: 28px;
-        }
-
-        .empty-tree-state {
-          padding: 2.5rem 1rem;
-          text-align: center;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 0.5rem;
-          color: var(--text-secondary);
+        .history-header h4 {
           font-size: 0.84rem;
-        }
-
-        .empty-tree-icon {
-          color: var(--text-muted);
-          opacity: 0.5;
-        }
-
-        /* BELOW TREE BOXES GRID */
-        .below-tree-boxes-panel {
-          margin-top: 0.5rem;
-        }
-
-        .doc-boxes-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-          gap: 1rem;
-        }
-
-        .doc-tile-card {
-          padding: 1rem;
-          display: flex;
-          flex-direction: column;
-          justify-content: space-between;
-          height: 150px;
-          background: var(--bg-surface-elevated);
-          border: 1px solid var(--border-card);
-        }
-
-        .tile-top-row {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-        }
-
-        .tile-code {
-          font-family: var(--font-mono);
-          font-weight: 800;
-          font-size: 0.8rem;
-          color: var(--accent-primary);
-          background: rgba(56, 189, 248, 0.12);
-          padding: 0.15rem 0.5rem;
-          border-radius: 5px;
-        }
-
-        .tile-actions {
-          display: flex;
-          align-items: center;
-          gap: 0.3rem;
-        }
-
-        .tile-action-btn {
-          background: transparent;
-          border: none;
-          color: var(--text-muted);
-          cursor: pointer;
-          padding: 0.2rem;
-        }
-
-        .tile-action-btn:hover {
-          color: var(--text-primary);
-        }
-
-        .tile-action-btn.delete-btn:hover {
-          color: #ef4444;
-        }
-
-        .tile-title {
-          font-size: 0.92rem;
           font-weight: 700;
           color: var(--text-primary);
-          line-height: 1.35;
-          margin-top: 0.3rem;
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
         }
 
-        .tile-url-preview {
-          font-size: 0.7rem;
-          font-family: var(--font-mono);
-          color: var(--text-muted);
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-
-        .tile-footer {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding-top: 0.5rem;
-          border-top: 1px solid var(--border-subtle);
-          margin-top: 0.3rem;
-        }
-
-        .course-badge {
+        .history-info-badge {
           font-size: 0.68rem;
           color: var(--text-muted);
         }
 
-        .open-doc-tile-btn {
-          background: var(--bg-surface);
-          border: 1px solid var(--border-card);
-          color: var(--accent-primary);
-          padding: 0.25rem 0.65rem;
-          border-radius: 6px;
-          font-size: 0.76rem;
-          font-weight: 600;
-          display: inline-flex;
-          align-items: center;
-          gap: 0.3rem;
-          cursor: pointer;
-          transition: var(--transition-smooth);
-        }
-
-        .open-doc-tile-btn:hover {
-          background: var(--accent-primary);
-          color: #030712;
-        }
-
-        .add-doc-tile-placeholder {
-          height: 150px;
+        .past-days-list {
           display: flex;
           flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 0.5rem;
-          border: 2px dashed var(--border-card);
-          background: transparent;
-          color: var(--text-muted);
-          font-size: 0.86rem;
-          font-weight: 600;
-          cursor: pointer;
-          transition: var(--transition-smooth);
+          gap: 0.45rem;
+          max-height: 280px;
+          overflow-y: auto;
         }
 
-        .add-doc-tile-placeholder:hover {
-          border-color: var(--accent-primary);
-          color: var(--accent-primary);
-          background: var(--bg-glass-card-hover);
+        .past-day-card {
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(255, 255, 255, 0.06);
+          border-radius: 8px;
+          overflow: hidden;
+        }
+
+        .past-day-header {
+          padding: 0.55rem 0.75rem;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          cursor: pointer;
+          transition: background 0.2s ease;
+        }
+
+        .past-day-header:hover {
+          background: rgba(255, 255, 255, 0.05);
+        }
+
+        .past-day-meta {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+
+        .past-day-title {
+          font-size: 0.8rem;
+          font-weight: 600;
+          color: var(--text-secondary);
+        }
+
+        .past-sessions-pill {
+          background: rgba(255, 255, 255, 0.05);
+          color: var(--text-muted);
+          font-size: 0.66rem;
+          padding: 0.05rem 0.35rem;
+          border-radius: 4px;
+        }
+
+        .past-day-ctrls {
+          display: flex;
+          align-items: center;
+          gap: 0.35rem;
+        }
+
+        .btn-past-action {
+          background: transparent;
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          color: var(--text-muted);
+          padding: 0.2rem 0.45rem;
+          border-radius: 5px;
+          font-size: 0.68rem;
+          display: flex;
+          align-items: center;
+          gap: 0.25rem;
+          cursor: pointer;
+        }
+
+        .btn-past-action:hover {
+          color: var(--text-primary);
+          border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .btn-past-action.danger:hover {
+          color: #ef4444;
+          border-color: rgba(239, 68, 68, 0.4);
+        }
+
+        .btn-past-action.toggle {
+          padding: 0.2rem 0.3rem;
+        }
+
+        .past-day-content-wrap {
+          padding: 0.6rem 0.75rem;
+          background: #070a0f;
+          border-top: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .past-day-textarea {
+          width: 100%;
+          background: transparent;
+          border: none;
+          outline: none;
+          color: #cbd5e1;
+          font-family: var(--font-mono);
+          font-size: 0.78rem;
+          line-height: 1.5;
+          resize: vertical;
+        }
+
+        @media (max-width: 640px) {
+          .voice-header {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+          .dictation-bar {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+          .sheet-top-meta {
+            flex-direction: column;
+            align-items: flex-start;
+          }
         }
       `}</style>
     </div>
@@ -4169,18 +4803,13 @@ import {
   Briefcase,
   Compass,
   ArrowRight,
-  FileText,
-  BookOpen,
 } from 'lucide-react';
 
 export const DashboardMasterGrid: React.FC = () => {
   const {
     masterTiles,
     setActiveTileId,
-    treeNodes,
     links,
-    revisionCards,
-    getSubTracksForTile,
   } = useDrishti();
 
   const getTileIcon = (id: MasterTileId) => {
@@ -4210,11 +4839,10 @@ export const DashboardMasterGrid: React.FC = () => {
 
   const getStats = (id: MasterTileId) => {
     if (id === 'tools') {
-      return `${links.length} Deep Links`;
+      return `${links.length} Tools & Launchers`;
     }
-    const notesCount = treeNodes.filter((n) => n.masterTileId === id).length;
-    const revCount = revisionCards.filter((r) => r.masterTileId === id).length;
-    return `${notesCount} Docs • ${revCount} Flashcards`;
+    const count = links.filter((l) => l.masterTileId === id || (id === 'ai' && l.category === 'ai') || (id === 'life-sutras' && l.category === 'spiritual')).length;
+    return `${count} Notes & Links`;
   };
 
   return (
@@ -4223,7 +4851,7 @@ export const DashboardMasterGrid: React.FC = () => {
         <div>
           <h2 className="section-main-title">Focus & Learning Hubs</h2>
           <p className="section-main-subtitle">
-            Select any hub to explore its multi-level tree notes, Google Docs, flashcards, and tools
+            Direct access to dedicated Google Docs, notes, repositories, and curated resources
           </p>
         </div>
       </div>
@@ -4255,30 +4883,11 @@ export const DashboardMasterGrid: React.FC = () => {
             <div className="hub-content">
               <h3 className="hub-title">{tile.title}</h3>
               <p className="hub-subtitle">{tile.subtitle}</p>
-
-              {/* Subtracks Preview Pills */}
-              {(() => {
-                const tracks = getSubTracksForTile(tile.id);
-                return (
-                  <div className="subtracks-pill-row">
-                    {tracks.slice(0, 3).map((track, idx) => (
-                      <span key={idx} className="track-mini-pill">
-                        {track}
-                      </span>
-                    ))}
-                    {tracks.length > 3 && (
-                      <span className="track-mini-pill more-pill">
-                        +{tracks.length - 3} more
-                      </span>
-                    )}
-                  </div>
-                );
-              })()}
             </div>
 
             <div className="hub-footer">
               <span className="explore-cta">
-                <span>Open Hub & Tree</span>
+                <span>Open Hub</span>
                 <ArrowRight size={14} />
               </span>
             </div>
@@ -4314,7 +4923,7 @@ export const DashboardMasterGrid: React.FC = () => {
 
         .master-tiles-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+          grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
           gap: 1.25rem;
         }
 
@@ -4323,7 +4932,7 @@ export const DashboardMasterGrid: React.FC = () => {
           display: flex;
           flex-direction: column;
           justify-content: space-between;
-          height: 230px;
+          height: 190px;
           cursor: pointer;
           border: 1px solid var(--border-card);
           transition: var(--transition-bounce);
@@ -4363,7 +4972,7 @@ export const DashboardMasterGrid: React.FC = () => {
         }
 
         .hub-content {
-          margin: 0.6rem 0;
+          margin: 0.4rem 0;
         }
 
         .hub-title {
@@ -4382,28 +4991,6 @@ export const DashboardMasterGrid: React.FC = () => {
           -webkit-line-clamp: 2;
           -webkit-box-orient: vertical;
           overflow: hidden;
-        }
-
-        .subtracks-pill-row {
-          display: flex;
-          gap: 0.35rem;
-          flex-wrap: wrap;
-          margin-top: 0.55rem;
-        }
-
-        .track-mini-pill {
-          font-size: 0.68rem;
-          color: var(--text-muted);
-          background: var(--bg-surface);
-          border: 1px solid var(--border-subtle);
-          padding: 0.12rem 0.45rem;
-          border-radius: 5px;
-          white-space: nowrap;
-        }
-
-        .more-pill {
-          color: var(--accent-primary);
-          font-weight: 600;
         }
 
         .hub-footer {
@@ -4451,12 +5038,10 @@ import {
   Search,
   Sliders,
   Palette,
-  Download,
-  RotateCcw,
-  Zap,
   Check,
   Cloud,
   CloudOff,
+  Mic,
 } from 'lucide-react';
 
 const THEMES: { id: ThemeMode; name: string; iconColor: string; bgPreview: string }[] = [
@@ -4481,12 +5066,9 @@ export const Header: React.FC = () => {
     setTheme,
     setUiScale,
     setIsCommandPaletteOpen,
-    exportDataJson,
-    resetToDefaults,
   } = useDrishti();
 
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCloudInfoOpen, setIsCloudInfoOpen] = useState(false);
 
   return (
@@ -4651,47 +5233,22 @@ export const Header: React.FC = () => {
             <span className="scale-badge">{settings.uiScale}%</span>
           </div>
 
-          {/* Quick Settings & Backup */}
-          <div className="relative-dropdown">
-            <button
-              onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-              className="btn-icon settings-btn"
-              title="Backup, Export & Options"
-            >
-              <Zap size={17} />
-            </button>
-
-            {isSettingsOpen && (
-              <div className="dropdown-menu settings-menu">
-                <div className="dropdown-header">
-                  <Sliders size={14} />
-                  <span>Command Center Controls</span>
-                </div>
-                <button
-                  onClick={() => {
-                    exportDataJson();
-                    setIsSettingsOpen(false);
-                  }}
-                  className="settings-option"
-                >
-                  <Download size={15} />
-                  <span>Export Master Backup (JSON)</span>
-                </button>
-                <button
-                  onClick={() => {
-                    if (confirm('Reset all 10 tiles, trees, and flashcards to default Drishti state?')) {
-                      resetToDefaults();
-                      setIsSettingsOpen(false);
-                    }
-                  }}
-                  className="settings-option reset-option"
-                >
-                  <RotateCcw size={15} />
-                  <span>Reset to Defaults</span>
-                </button>
-              </div>
-            )}
-          </div>
+          {/* Quick Voice Journal & Dictation Trigger */}
+          <button
+            onClick={() => {
+              setActiveTileId(null);
+              setTimeout(() => {
+                const section = document.getElementById('daily-voice-journal-section');
+                if (section) {
+                  section.scrollIntoView({ behavior: 'smooth' });
+                }
+              }, 50);
+            }}
+            className="btn-icon voice-btn"
+            title="Daily Voice Journal & Audio Dictation"
+          >
+            <Mic size={17} />
+          </button>
         </div>
       </div>
 
@@ -4892,6 +5449,12 @@ export const Header: React.FC = () => {
         .settings-option:hover {
           background: var(--bg-surface-elevated);
           color: var(--accent-primary);
+        }
+
+        .voice-btn:hover {
+          color: #c084fc !important;
+          border-color: rgba(168, 85, 247, 0.4) !important;
+          background: rgba(168, 85, 247, 0.12) !important;
         }
 
         .theme-option.active {
@@ -6109,19 +6672,15 @@ FILE: src/components/MasterTileDetailView.tsx
 
 import React, { useState } from 'react';
 import { useDrishti } from '@/context/DrishtiContext';
-import { CourseDocTree } from './CourseDocTree';
-import { ToolsTileDeck } from './ToolsTileDeck';
-import { RevisionFlashcardDeck } from './RevisionFlashcardDeck';
+import { LinkFlashcard } from './LinkFlashcard';
 import { TechRadarCard } from './TechRadarCard';
-import { ScratchpadCard } from './ScratchpadCard';
-import { WisdomFocusCard } from './WisdomFocusCard';
 import {
-  Plus,
   ArrowLeft,
-  Layers,
-  X,
-  Check,
-  FolderPlus,
+  Plus,
+  Search,
+  SearchX,
+  Compass,
+  FileText,
 } from 'lucide-react';
 
 export const MasterTileDetailView: React.FC = () => {
@@ -6129,27 +6688,47 @@ export const MasterTileDetailView: React.FC = () => {
     masterTiles,
     activeTileId,
     setActiveTileId,
-    activeSubTrack,
-    setActiveSubTrack,
-    getSubTracksForTile,
-    addCustomSubTrack,
-    deleteCustomSubTrack,
+    links,
+    setIsAddLinkModalOpen,
+    setDefaultModalCategory,
   } = useDrishti();
 
-  const [isAddingTrack, setIsAddingTrack] = useState(false);
-  const [newTrackName, setNewTrackName] = useState('');
+  const [tileSearch, setTileSearch] = useState('');
 
   const currentTile = masterTiles.find((t) => t.id === activeTileId);
   if (!currentTile) return null;
 
-  const currentSubTracks = getSubTracksForTile(currentTile.id);
+  // Filter links belonging to this tile
+  // Match either explicit masterTileId OR tile id matching link category
+  const tileLinks = links.filter((l) => {
+    const matchesTile =
+      l.masterTileId === currentTile.id ||
+      (currentTile.id === 'tools' && l.category !== undefined) ||
+      (currentTile.id === 'ai' && l.category === 'ai') ||
+      (currentTile.id === 'life-sutras' && l.category === 'spiritual') ||
+      (currentTile.id === 'open-source' && (l.tags?.includes('Open Source') || l.tags?.includes('GitHub'))) ||
+      (currentTile.id === 'apply-job' && (l.category === 'social' || l.tags?.includes('Career')));
 
-  const handleCreateSubTrack = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newTrackName.trim()) {
-      addCustomSubTrack(currentTile.id, newTrackName.trim());
-      setNewTrackName('');
-      setIsAddingTrack(false);
+    if (!matchesTile) return false;
+
+    if (tileSearch.trim()) {
+      const q = tileSearch.toLowerCase();
+      const matchTitle = l.title.toLowerCase().includes(q);
+      const matchUrl = l.url.toLowerCase().includes(q);
+      const matchTags = l.tags?.some((t) => t.toLowerCase().includes(q));
+      const matchDesc = l.description?.toLowerCase().includes(q);
+      return matchTitle || matchUrl || matchTags || matchDesc;
+    }
+
+    return true;
+  });
+
+  const getCategoryForTile = (tileId: string) => {
+    switch (tileId) {
+      case 'ai': return 'ai';
+      case 'life-sutras': return 'spiritual';
+      case 'tools': return 'productivity';
+      default: return 'productivity';
     }
   };
 
@@ -6168,129 +6747,112 @@ export const MasterTileDetailView: React.FC = () => {
 
         <span className="breadcrumb-sep">/</span>
         <span className="breadcrumb-current-tile">{currentTile.title}</span>
-
-        {activeTileId !== 'tools' && activeTileId !== 'market-updates' && (
-          <>
-            <span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-subtrack">{activeSubTrack}</span>
-          </>
-        )}
       </div>
 
       {/* Hub Hero Banner */}
       <div className="hub-hero-banner bento-card">
-        <div className="hero-content">
-          <h2 className="hero-title">{currentTile.title}</h2>
-          <p className="hero-subtitle">{currentTile.subtitle}</p>
+        <div className="hero-top-row">
+          <div className="hero-content">
+            <h2 className="hero-title">{currentTile.title}</h2>
+            <p className="hero-subtitle">{currentTile.subtitle}</p>
+          </div>
+
+          <button
+            onClick={() => {
+              setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
+              setIsAddLinkModalOpen(true);
+            }}
+            className="btn-primary add-doc-btn"
+          >
+            <Plus size={15} />
+            <span>Add Link / Document</span>
+          </button>
         </div>
 
-        {/* Dynamic Subtrack Switcher Pills */}
-        {activeTileId !== 'tools' && (
-          <div className="subtracks-bar">
-            {currentSubTracks.map((track) => {
-              const isActive = activeSubTrack === track;
-              const isDefaultTrack = currentTile.subTracks.includes(track);
-
-              return (
-                <div key={track} className="track-pill-wrapper">
-                  <button
-                    onClick={() => setActiveSubTrack(track)}
-                    className={`filter-pill track-pill ${isActive ? 'active' : ''}`}
-                  >
-                    <Layers size={13} />
-                    <span>{track}</span>
-                  </button>
-
-                  {!isDefaultTrack && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (confirm(`Delete custom sub-track "${track}" and its notes?`)) {
-                          deleteCustomSubTrack(currentTile.id, track);
-                        }
-                      }}
-                      className="track-delete-btn"
-                      title={`Delete sub-track ${track}`}
-                    >
-                      <X size={11} />
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-
-            {isAddingTrack ? (
-              <form onSubmit={handleCreateSubTrack} className="inline-add-track-form">
-                <input
-                  type="text"
-                  placeholder="Sub-track name (e.g. Bangalore)..."
-                  value={newTrackName}
-                  onChange={(e) => setNewTrackName(e.target.value)}
-                  autoFocus
-                  className="add-track-input"
-                />
-                <button type="submit" className="add-track-submit-btn" title="Add Track">
-                  <Check size={13} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsAddingTrack(false);
-                    setNewTrackName('');
-                  }}
-                  className="add-track-cancel-btn"
-                  title="Cancel"
-                >
-                  <X size={13} />
-                </button>
-              </form>
-            ) : (
-              <button
-                onClick={() => setIsAddingTrack(true)}
-                className="filter-pill add-track-pill"
-                title="Create a new custom tab / sub-track"
-              >
-                <Plus size={13} />
-                <span>New Sub-Track</span>
-              </button>
-            )}
-          </div>
-        )}
+        {/* Local Search inside this Hub */}
+        <div className="hub-search-bar">
+          <Search size={15} className="hub-search-icon" />
+          <input
+            type="text"
+            placeholder={`Search ${currentTile.title} notes & links...`}
+            value={tileSearch}
+            onChange={(e) => setTileSearch(e.target.value)}
+            className="hub-search-input"
+          />
+          {tileSearch && (
+            <button onClick={() => setTileSearch('')} className="clear-search-btn">
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Conditional Hub Content */}
-      {activeTileId === 'tools' ? (
-        /* Tools Deep Link Deck */
-        <div className="hub-body-section">
-          <ToolsTileDeck />
-        </div>
-      ) : activeTileId === 'market-updates' ? (
-        /* Market Updates & Pulse */
-        <div className="hub-grid-2col">
+      {activeTileId === 'market-updates' && (
+        <div className="market-radar-section">
           <TechRadarCard />
-          <ScratchpadCard />
-        </div>
-      ) : activeTileId === 'life-sutras' ? (
-        /* Life Sutras with Wisdom Card & Tree */
-        <div className="hub-body-stack">
-          <WisdomFocusCard />
-          <CourseDocTree />
-          <RevisionFlashcardDeck />
-        </div>
-      ) : (
-        /* Standard Learning Hubs (AI, Coding DSA, System Design, Health, Finance, Apply Job, Open Source) */
-        <div className="hub-body-stack">
-          {/* 1. Hierarchical Tree & Below-Tree Box Grid */}
-          <CourseDocTree />
-
-          {/* 2. Active Recall Flashcards & Quick Notes */}
-          <div className="hub-grid-2col">
-            <RevisionFlashcardDeck />
-            <ScratchpadCard />
-          </div>
         </div>
       )}
+
+      {/* Hub Direct Links & Notes Grid */}
+      <div className="hub-resources-section">
+        <div className="section-header-row">
+          <div className="section-title-wrap">
+            <FileText size={16} color={currentTile.colorAccent} />
+            <h3 className="section-title">Documents, Notes & Direct Launchers</h3>
+          </div>
+          <span className="resource-count-badge">
+            {tileLinks.length} {tileLinks.length === 1 ? 'item' : 'items'}
+          </span>
+        </div>
+
+        {tileLinks.length > 0 ? (
+          <div className="resources-grid">
+            {tileLinks.map((link, idx) => (
+              <LinkFlashcard key={link.id} link={link} index={idx} />
+            ))}
+
+            {/* "+ New Item" Quick Tile */}
+            <div
+              className="add-card-placeholder bento-card"
+              onClick={() => {
+                setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
+                setIsAddLinkModalOpen(true);
+              }}
+              role="button"
+              tabIndex={0}
+            >
+              <div className="plus-circle-aura">
+                <Plus size={22} />
+              </div>
+              <span className="add-text">Add New Note / Link</span>
+              <span className="add-subtext">Direct destination URL or Google Doc</span>
+            </div>
+          </div>
+        ) : (
+          <div className="empty-hub-state bento-card">
+            <SearchX size={36} className="empty-icon" />
+            <h3 className="empty-title">
+              {tileSearch ? 'No items match your search' : 'No documents or links added yet'}
+            </h3>
+            <p className="empty-desc">
+              {tileSearch
+                ? `No resources found matching "${tileSearch}".`
+                : `Add your Google Docs, GitHub repos, or direct destination links to ${currentTile.title}.`}
+            </p>
+            <button
+              onClick={() => {
+                setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
+                setIsAddLinkModalOpen(true);
+              }}
+              className="btn-primary empty-add-btn"
+            >
+              <Plus size={15} />
+              <span>Add First Document / Link</span>
+            </button>
+          </div>
+        )}
+      </div>
 
       <style jsx>{`
         .tile-detail-container {
@@ -6336,11 +6898,6 @@ export const MasterTileDetailView: React.FC = () => {
           color: var(--text-primary);
         }
 
-        .breadcrumb-subtrack {
-          color: var(--accent-primary);
-          font-weight: 600;
-        }
-
         .hub-hero-banner {
           padding: 1.5rem;
           display: flex;
@@ -6352,6 +6909,14 @@ export const MasterTileDetailView: React.FC = () => {
             var(--bg-surface-elevated) 100%
           );
           border: 1px solid var(--border-card);
+        }
+
+        .hero-top-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          flex-wrap: wrap;
+          gap: 1rem;
         }
 
         .hero-title {
@@ -6367,114 +6932,179 @@ export const MasterTileDetailView: React.FC = () => {
           margin-top: 2px;
         }
 
-        .subtracks-bar {
+        .add-doc-btn {
+          padding: 0.5rem 1rem;
+          font-size: 0.82rem;
+        }
+
+        .hub-search-bar {
           display: flex;
           align-items: center;
-          gap: 0.5rem;
-          flex-wrap: wrap;
-          padding-top: 0.4rem;
+          gap: 0.6rem;
+          background: rgba(0, 0, 0, 0.3);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 10px;
+          padding: 0.45rem 0.8rem;
+          max-width: 460px;
         }
 
-        .track-pill-wrapper {
-          position: relative;
-          display: inline-flex;
-          align-items: center;
+        .hub-search-icon {
+          color: var(--text-muted);
         }
 
-        .track-pill {
-          padding-right: 0.85rem;
-        }
-
-        .track-delete-btn {
-          margin-left: -0.4rem;
-          background: rgba(244, 63, 94, 0.15);
-          border: 1px solid rgba(244, 63, 94, 0.3);
-          color: #f43f5e;
-          border-radius: 999px;
-          width: 18px;
-          height: 18px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-
-        .track-delete-btn:hover {
-          background: #f43f5e;
-          color: #fff;
-        }
-
-        .inline-add-track-form {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.35rem;
-          background: var(--bg-surface-elevated);
-          border: 1px solid var(--accent-primary);
-          padding: 0.2rem 0.4rem;
-          border-radius: 999px;
-        }
-
-        .add-track-input {
+        .hub-search-input {
           background: transparent;
           border: none;
           outline: none;
-          color: var(--text-primary);
-          font-size: 0.78rem;
-          padding: 0.2rem 0.4rem;
-          min-width: 160px;
+          color: #ffffff;
+          font-size: 0.82rem;
+          width: 100%;
         }
 
-        .add-track-submit-btn {
-          background: var(--accent-primary);
-          color: #030712;
-          border: none;
-          border-radius: 999px;
-          width: 22px;
-          height: 22px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          font-weight: 700;
-        }
-
-        .add-track-cancel-btn {
+        .clear-search-btn {
           background: transparent;
           border: none;
           color: var(--text-muted);
-          width: 22px;
-          height: 22px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
           cursor: pointer;
+          font-size: 0.8rem;
         }
 
-        .add-track-cancel-btn:hover {
-          color: #f43f5e;
+        .market-radar-section {
+          margin-bottom: 0.5rem;
         }
 
-        .add-track-pill {
-          border-style: dashed;
-        }
-
-        .hub-body-stack {
+        .hub-resources-section {
           display: flex;
           flex-direction: column;
-          gap: 1.75rem;
+          gap: 1rem;
         }
 
-        .hub-grid-2col {
+        .section-header-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+
+        .section-title-wrap {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+
+        .section-title {
+          font-size: 1.05rem;
+          font-weight: 700;
+          color: var(--text-primary);
+        }
+
+        .resource-count-badge {
+          background: var(--bg-surface-elevated);
+          border: 1px solid var(--border-card);
+          color: var(--text-muted);
+          font-size: 0.72rem;
+          font-family: var(--font-mono);
+          padding: 0.2rem 0.55rem;
+          border-radius: 999px;
+        }
+
+        .resources-grid {
           display: grid;
-          grid-template-columns: 1.3fr 1fr;
-          gap: 1.5rem;
-          align-items: stretch;
+          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+          gap: 1.25rem;
         }
 
-        @media (max-width: 1000px) {
-          .hub-grid-2col {
+        .add-card-placeholder {
+          height: 210px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          border: 2px dashed var(--border-card);
+          cursor: pointer;
+          background: transparent;
+          gap: 0.45rem;
+          transition: var(--transition-smooth);
+        }
+
+        .add-card-placeholder:hover {
+          border-color: var(--accent-primary);
+          background: var(--bg-glass-card-hover);
+          transform: translateY(-3px);
+        }
+
+        .plus-circle-aura {
+          width: 42px;
+          height: 42px;
+          border-radius: 50%;
+          background: var(--bg-surface-elevated);
+          border: 1px solid var(--border-card);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: var(--accent-primary);
+          transition: var(--transition-bounce);
+        }
+
+        .add-card-placeholder:hover .plus-circle-aura {
+          background: var(--accent-primary);
+          color: #030712;
+          transform: scale(1.1) rotate(90deg);
+        }
+
+        .add-text {
+          font-size: 0.9rem;
+          font-weight: 700;
+          color: var(--text-primary);
+        }
+
+        .add-subtext {
+          font-size: 0.72rem;
+          color: var(--text-muted);
+          text-align: center;
+          padding: 0 1rem;
+        }
+
+        .empty-hub-state {
+          padding: 3rem 2rem;
+          text-align: center;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 0.75rem;
+        }
+
+        .empty-icon {
+          color: var(--text-muted);
+          opacity: 0.6;
+        }
+
+        .empty-title {
+          font-size: 1.15rem;
+          font-weight: 700;
+          color: var(--text-primary);
+        }
+
+        .empty-desc {
+          font-size: 0.84rem;
+          color: var(--text-secondary);
+          max-width: 440px;
+        }
+
+        .empty-add-btn {
+          margin-top: 0.5rem;
+        }
+
+        @media (max-width: 640px) {
+          .resources-grid {
             grid-template-columns: 1fr;
+          }
+          .hero-top-row {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+          .hub-search-bar {
+            max-width: 100%;
           }
         }
       `}</style>
@@ -6707,1112 +7337,6 @@ export const RecentHistoryCard: React.FC = () => {
 
         .empty-icon {
           opacity: 0.5;
-        }
-      `}</style>
-    </div>
-  );
-};
-
-
-================================================================================
-FILE: src/components/RevisionFlashcardDeck.tsx
-================================================================================
-'use client';
-
-import React, { useState, useEffect } from 'react';
-import { useDrishti } from '@/context/DrishtiContext';
-import { RevisionCategory, RevisionDifficulty, MasteryStatus } from '@/types';
-import {
-  Brain,
-  RotateCw,
-  ChevronLeft,
-  ChevronRight,
-  Shuffle,
-  Plus,
-  HelpCircle,
-  CheckCircle2,
-  BookOpen,
-  Code2,
-  Copy,
-  Check,
-  Award,
-  Sparkles,
-  Trash2,
-  Lightbulb,
-} from 'lucide-react';
-
-const REVISION_CATS: RevisionCategory[] = [
-  'All',
-  'AI & Deep Learning',
-  'System Design',
-  'DSA & Algorithms',
-];
-
-export const RevisionFlashcardDeck: React.FC = () => {
-  const {
-    revisionCards,
-    activeRevisionCategory,
-    setActiveRevisionCategory,
-    activeCardIndex,
-    setActiveCardIndex,
-    nextRevisionCard,
-    prevRevisionCard,
-    shuffleRevisionCards,
-    toggleMasteryStatus,
-    deleteRevisionCard,
-    setIsAddRevisionModalOpen,
-  } = useDrishti();
-
-  const [isFlipped, setIsFlipped] = useState(false);
-  const [showHint, setShowHint] = useState(false);
-  const [copiedCode, setCopiedCode] = useState(false);
-
-  // Filter cards by selected category
-  const filteredCards = revisionCards.filter((c) =>
-    activeRevisionCategory === 'All' ? true : c.category === activeRevisionCategory
-  );
-
-  const currentCard =
-    filteredCards.length > 0
-      ? filteredCards[Math.min(activeCardIndex, filteredCards.length - 1)]
-      : null;
-
-  // Reset flip state when card or category changes
-  useEffect(() => {
-    setIsFlipped(false);
-    setShowHint(false);
-    setCopiedCode(false);
-  }, [activeCardIndex, activeRevisionCategory]);
-
-  const handleCopyCode = (code: string) => {
-    navigator.clipboard.writeText(code);
-    setCopiedCode(true);
-    setTimeout(() => setCopiedCode(false), 2000);
-  };
-
-  const getDifficultyColor = (diff: RevisionDifficulty) => {
-    switch (diff) {
-      case 'Beginner':
-        return '#34d399';
-      case 'Intermediate':
-        return '#60a5fa';
-      case 'Advanced':
-        return '#f43f5e';
-    }
-  };
-
-  const getMasteryBadge = (status: MasteryStatus) => {
-    switch (status) {
-      case 'mastered':
-        return { label: 'Mastered', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' };
-      case 'reviewing':
-        return { label: 'Reviewing', color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.15)' };
-      case 'learning':
-        return { label: 'Learning', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)' };
-    }
-  };
-
-  return (
-    <section className="revision-deck-section">
-      {/* Header & Category Switcher */}
-      <div className="rev-header">
-        <div className="rev-title-row">
-          <div className="rev-title-group">
-            <div className="rev-icon-badge">
-              <Brain size={18} />
-            </div>
-            <div>
-              <h2 className="rev-heading">Active Recall Flashcards</h2>
-              <p className="rev-subheading">SDE & AI/ML concept revision with interactive 3D flip</p>
-            </div>
-          </div>
-
-          <div className="rev-actions-row">
-            <button
-              onClick={shuffleRevisionCards}
-              className="btn-icon shuffle-btn"
-              title="Shuffle Deck"
-            >
-              <Shuffle size={15} />
-            </button>
-            <button
-              onClick={() => setIsAddRevisionModalOpen(true)}
-              className="btn-primary add-card-btn"
-            >
-              <Plus size={14} />
-              <span>New Question</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Category Tabs */}
-        <div className="rev-category-pills">
-          {REVISION_CATS.map((cat) => {
-            const count =
-              cat === 'All'
-                ? revisionCards.length
-                : revisionCards.filter((c) => c.category === cat).length;
-            return (
-              <button
-                key={cat}
-                onClick={() => {
-                  setActiveRevisionCategory(cat);
-                  setActiveCardIndex(0);
-                }}
-                className={`filter-pill ${activeRevisionCategory === cat ? 'active' : ''}`}
-              >
-                <span>{cat}</span>
-                <span className="pill-count">{count}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* The 3D Flashcard Container */}
-      {currentCard ? (
-        <div className="flashcard-viewport">
-          <div className={`flashcard-3d-wrapper ${isFlipped ? 'is-flipped' : ''}`}>
-            {/* ================= FRONT FACE (QUESTION) ================= */}
-            <div
-              className="flashcard-face bento-card rev-card-front"
-              onClick={() => setIsFlipped(true)}
-            >
-              {/* Card Meta Bar */}
-              <div className="rev-card-meta">
-                <div className="meta-left">
-                  <span className="rev-cat-tag">{currentCard.category}</span>
-                  <span
-                    className="rev-diff-tag"
-                    style={{
-                      color: getDifficultyColor(currentCard.difficulty),
-                      borderColor: getDifficultyColor(currentCard.difficulty),
-                    }}
-                  >
-                    {currentCard.difficulty}
-                  </span>
-                </div>
-
-                <div className="meta-right">
-                  {(() => {
-                    const m = getMasteryBadge(currentCard.masteryStatus);
-                    return (
-                      <span
-                        className="mastery-pill"
-                        style={{ color: m.color, background: m.bg }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleMasteryStatus(currentCard.id);
-                        }}
-                        title="Click to cycle status"
-                      >
-                        <Award size={12} />
-                        {m.label}
-                      </span>
-                    );
-                  })()}
-                </div>
-              </div>
-
-              {/* Central Question */}
-              <div className="rev-question-body">
-                <span className="q-label">QUESTION & PROBLEM</span>
-                <h3 className="rev-question-text">{currentCard.question}</h3>
-
-                {/* Hint Toggle */}
-                {currentCard.hint && (
-                  <div className="hint-section" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      type="button"
-                      onClick={() => setShowHint(!showHint)}
-                      className="hint-toggle-btn"
-                    >
-                      <Lightbulb size={13} className="lightbulb-icon" />
-                      <span>{showHint ? 'Hide Hint' : 'Reveal Hint'}</span>
-                    </button>
-                    {showHint && <p className="hint-content">{currentCard.hint}</p>}
-                  </div>
-                )}
-              </div>
-
-              {/* Tags & Flip Action Prompt */}
-              <div className="rev-front-footer">
-                <div className="rev-tags-wrap">
-                  {currentCard.tags.map((tag, i) => (
-                    <span key={i} className="rev-tag">
-                      #{tag}
-                    </span>
-                  ))}
-                </div>
-
-                <button
-                  type="button"
-                  className="flip-prompt-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsFlipped(true);
-                  }}
-                >
-                  <RotateCw size={14} className="flip-icon-anim" />
-                  <span>Reveal Solution</span>
-                </button>
-              </div>
-            </div>
-
-            {/* ================= BACK FACE (ANSWER & CODE) ================= */}
-            <div className="flashcard-face flashcard-face-back bento-card rev-card-back">
-              {/* Back Top Meta Bar */}
-              <div className="rev-back-header">
-                <div className="back-meta-left">
-                  <CheckCircle2 size={16} className="solution-check" />
-                  <span className="solution-title">Solution & Key Takeaways</span>
-                </div>
-
-                <div className="back-meta-right">
-                  <button
-                    onClick={() => setIsFlipped(false)}
-                    className="flip-back-pill"
-                    title="Flip Back to Question"
-                  >
-                    <RotateCw size={12} />
-                    <span>Question</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Scrollable Answer Content */}
-              <div className="rev-answer-scroll">
-                {/* Summary Box */}
-                <div className="summary-box">
-                  <span className="summary-lbl">CORE FORMULA / SUMMARY:</span>
-                  <p className="summary-txt">{currentCard.answerSummary}</p>
-                </div>
-
-                {/* Markdown Detailed Explanation */}
-                <div className="markdown-explanation">
-                  {currentCard.answerMarkdown.split('\n\n').map((paragraph, pIdx) => (
-                    <p key={pIdx} className="markdown-p">
-                      {paragraph}
-                    </p>
-                  ))}
-                </div>
-
-                {/* Code Snippet Box */}
-                {currentCard.codeSnippet && (
-                  <div className="code-block-wrap">
-                    <div className="code-header">
-                      <div className="code-lang-label">
-                        <Code2 size={13} />
-                        <span>{currentCard.codeSnippet.language.toUpperCase()}</span>
-                      </div>
-                      <button
-                        onClick={() => handleCopyCode(currentCard.codeSnippet!.code)}
-                        className="copy-code-btn"
-                        title="Copy Code"
-                      >
-                        {copiedCode ? <Check size={13} color="#10b981" /> : <Copy size={13} />}
-                        <span>{copiedCode ? 'Copied!' : 'Copy'}</span>
-                      </button>
-                    </div>
-                    <pre className="code-content">
-                      <code>{currentCard.codeSnippet.code}</code>
-                    </pre>
-                  </div>
-                )}
-
-                {/* Key Takeaways Checklist */}
-                {currentCard.keyTakeaways && currentCard.keyTakeaways.length > 0 && (
-                  <div className="takeaways-box">
-                    <span className="takeaways-title">Key Engineering Takeaways:</span>
-                    <ul className="takeaways-list">
-                      {currentCard.keyTakeaways.map((takeaway, tIdx) => (
-                        <li key={tIdx} className="takeaway-item">
-                          <Check size={13} className="takeaway-check" />
-                          <span>{takeaway}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-
-              {/* Back Footer: Mastery Controls */}
-              <div className="rev-back-footer">
-                <div className="mastery-buttons-group">
-                  <span className="mastery-lbl">Confidence:</span>
-                  <button
-                    onClick={() => toggleMasteryStatus(currentCard.id)}
-                    className="cycle-mastery-btn"
-                  >
-                    Status: <strong>{currentCard.masteryStatus.toUpperCase()}</strong> (Click to change)
-                  </button>
-                </div>
-
-                <button
-                  onClick={() => {
-                    if (confirm('Delete this flashcard question?')) {
-                      deleteRevisionCard(currentCard.id);
-                    }
-                  }}
-                  className="delete-rev-card-btn"
-                  title="Delete Card"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="empty-deck-box bento-card">
-          <BookOpen size={36} className="empty-deck-icon" />
-          <h3>No Flashcards in this Category</h3>
-          <p>Create a new SDE or AI question to start practicing active recall.</p>
-          <button
-            onClick={() => setIsAddRevisionModalOpen(true)}
-            className="btn-primary"
-          >
-            <Plus size={15} />
-            <span>Create Flashcard</span>
-          </button>
-        </div>
-      )}
-
-      {/* Deck Controls (Prev, Next, Position) */}
-      {filteredCards.length > 0 && (
-        <div className="deck-nav-bar">
-          <button onClick={prevRevisionCard} className="btn-secondary nav-arrow-btn">
-            <ChevronLeft size={16} />
-            <span>Previous</span>
-          </button>
-
-          <div className="nav-counter-pill">
-            <span>
-              Card <strong>{activeCardIndex + 1}</strong> of <strong>{filteredCards.length}</strong>
-            </span>
-          </div>
-
-          <button onClick={nextRevisionCard} className="btn-secondary nav-arrow-btn">
-            <span>Next</span>
-            <ChevronRight size={16} />
-          </button>
-        </div>
-      )}
-
-      <style jsx>{`
-        .revision-deck-section {
-          display: flex;
-          flex-direction: column;
-          gap: 1.1rem;
-        }
-
-        .rev-header {
-          display: flex;
-          flex-direction: column;
-          gap: 0.85rem;
-        }
-
-        .rev-title-row {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          flex-wrap: wrap;
-          gap: 0.75rem;
-        }
-
-        .rev-title-group {
-          display: flex;
-          align-items: center;
-          gap: 0.85rem;
-        }
-
-        .rev-icon-badge {
-          width: 38px;
-          height: 38px;
-          border-radius: 10px;
-          background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(56, 189, 248, 0.2));
-          border: 1px solid var(--border-hover);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: var(--accent-tertiary);
-        }
-
-        .rev-heading {
-          font-size: 1.25rem;
-          font-weight: 800;
-          color: var(--text-primary);
-          letter-spacing: -0.02em;
-        }
-
-        .rev-subheading {
-          font-size: 0.8rem;
-          color: var(--text-muted);
-        }
-
-        .rev-actions-row {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-        }
-
-        .rev-category-pills {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          flex-wrap: wrap;
-        }
-
-        .pill-count {
-          background: rgba(0, 0, 0, 0.25);
-          font-size: 0.7rem;
-          padding: 0.1rem 0.4rem;
-          border-radius: 999px;
-          margin-left: 0.2rem;
-        }
-
-        .flashcard-viewport {
-          height: 420px;
-          perspective: 1200px;
-          position: relative;
-        }
-
-        .rev-card-front,
-        .rev-card-back {
-          display: flex;
-          flex-direction: column;
-          justify-content: space-between;
-          padding: 1.4rem;
-          height: 100%;
-          border: 1px solid var(--border-card);
-        }
-
-        .rev-card-front {
-          cursor: pointer;
-          background: linear-gradient(
-            150deg,
-            var(--bg-glass-card) 0%,
-            var(--bg-surface-elevated) 100%
-          );
-        }
-
-        .rev-card-meta {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-        }
-
-        .meta-left {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-        }
-
-        .rev-cat-tag {
-          font-size: 0.72rem;
-          font-weight: 700;
-          padding: 0.2rem 0.55rem;
-          background: rgba(168, 85, 247, 0.15);
-          color: var(--accent-tertiary);
-          border: 1px solid rgba(168, 85, 247, 0.3);
-          border-radius: 6px;
-        }
-
-        .rev-diff-tag {
-          font-size: 0.7rem;
-          font-weight: 600;
-          padding: 0.15rem 0.45rem;
-          border: 1px solid;
-          border-radius: 6px;
-        }
-
-        .mastery-pill {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.3rem;
-          font-size: 0.72rem;
-          font-weight: 600;
-          padding: 0.2rem 0.6rem;
-          border-radius: 999px;
-          cursor: pointer;
-          transition: var(--transition-smooth);
-        }
-
-        .rev-question-body {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          justify-content: center;
-          padding: 1rem 0;
-        }
-
-        .q-label {
-          font-size: 0.7rem;
-          font-family: var(--font-mono);
-          color: var(--accent-primary);
-          font-weight: 700;
-          letter-spacing: 0.08em;
-          margin-bottom: 0.4rem;
-        }
-
-        .rev-question-text {
-          font-size: 1.35rem;
-          font-weight: 700;
-          color: var(--text-primary);
-          line-height: 1.4;
-          letter-spacing: -0.02em;
-        }
-
-        .hint-section {
-          margin-top: 1rem;
-        }
-
-        .hint-toggle-btn {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.35rem;
-          background: rgba(245, 158, 11, 0.1);
-          border: 1px solid rgba(245, 158, 11, 0.3);
-          color: #fbbf24;
-          padding: 0.3rem 0.65rem;
-          border-radius: 6px;
-          font-size: 0.75rem;
-          font-weight: 600;
-          cursor: pointer;
-        }
-
-        .hint-content {
-          margin-top: 0.5rem;
-          font-size: 0.82rem;
-          color: var(--text-secondary);
-          background: var(--bg-surface);
-          padding: 0.6rem 0.8rem;
-          border-radius: 8px;
-          border-left: 3px solid #fbbf24;
-        }
-
-        .rev-front-footer {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding-top: 0.85rem;
-          border-top: 1px solid var(--border-subtle);
-        }
-
-        .rev-tags-wrap {
-          display: flex;
-          gap: 0.4rem;
-          flex-wrap: wrap;
-        }
-
-        .rev-tag {
-          font-size: 0.72rem;
-          color: var(--text-muted);
-          background: var(--bg-surface);
-          padding: 0.15rem 0.45rem;
-          border-radius: 4px;
-        }
-
-        .flip-prompt-btn {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.45rem;
-          background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
-          color: #030712;
-          font-weight: 700;
-          font-size: 0.82rem;
-          padding: 0.45rem 0.95rem;
-          border-radius: 8px;
-          border: none;
-          cursor: pointer;
-          box-shadow: 0 4px 14px rgba(56, 189, 248, 0.25);
-          transition: var(--transition-smooth);
-        }
-
-        .flip-prompt-btn:hover {
-          transform: scale(1.03);
-          filter: brightness(1.1);
-        }
-
-        .flip-icon-anim {
-          animation: spinOnce 0.6s ease;
-        }
-
-        /* BACK FACE STYLES */
-        .rev-card-back {
-          background: var(--bg-surface);
-        }
-
-        .rev-back-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding-bottom: 0.75rem;
-          border-bottom: 1px solid var(--border-subtle);
-        }
-
-        .back-meta-left {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-        }
-
-        .solution-check {
-          color: #10b981;
-        }
-
-        .solution-title {
-          font-size: 0.9rem;
-          font-weight: 700;
-          color: var(--text-primary);
-        }
-
-        .flip-back-pill {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.35rem;
-          background: var(--bg-surface-elevated);
-          border: 1px solid var(--border-card);
-          color: var(--text-secondary);
-          padding: 0.25rem 0.6rem;
-          border-radius: 6px;
-          font-size: 0.75rem;
-          cursor: pointer;
-        }
-
-        .flip-back-pill:hover {
-          color: var(--accent-primary);
-          border-color: var(--border-hover);
-        }
-
-        .rev-answer-scroll {
-          flex: 1;
-          overflow-y: auto;
-          padding: 0.85rem 0.2rem;
-          display: flex;
-          flex-direction: column;
-          gap: 0.85rem;
-        }
-
-        .summary-box {
-          background: rgba(56, 189, 248, 0.08);
-          border-left: 3px solid var(--accent-primary);
-          padding: 0.65rem 0.85rem;
-          border-radius: 0 8px 8px 0;
-        }
-
-        .summary-lbl {
-          font-size: 0.68rem;
-          font-family: var(--font-mono);
-          color: var(--accent-primary);
-          font-weight: 700;
-          display: block;
-        }
-
-        .summary-txt {
-          font-size: 0.86rem;
-          color: var(--text-primary);
-          margin-top: 0.2rem;
-          font-family: var(--font-mono);
-        }
-
-        .markdown-explanation {
-          font-size: 0.84rem;
-          color: var(--text-secondary);
-          line-height: 1.5;
-        }
-
-        .code-block-wrap {
-          background: #0d1117;
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          border-radius: 10px;
-          overflow: hidden;
-        }
-
-        .code-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 0.4rem 0.75rem;
-          background: #161b22;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-        }
-
-        .code-lang-label {
-          display: flex;
-          align-items: center;
-          gap: 0.4rem;
-          font-size: 0.7rem;
-          font-family: var(--font-mono);
-          color: #8b949e;
-        }
-
-        .copy-code-btn {
-          background: transparent;
-          border: none;
-          color: #8b949e;
-          font-size: 0.72rem;
-          display: inline-flex;
-          align-items: center;
-          gap: 0.3rem;
-          cursor: pointer;
-        }
-
-        .copy-code-btn:hover {
-          color: #f0f6fc;
-        }
-
-        .code-content {
-          padding: 0.75rem;
-          font-size: 0.8rem;
-          color: #e6edf3;
-          overflow-x: auto;
-          line-height: 1.45;
-        }
-
-        .takeaways-box {
-          background: var(--bg-surface-elevated);
-          border: 1px solid var(--border-card);
-          padding: 0.75rem 0.95rem;
-          border-radius: 10px;
-        }
-
-        .takeaways-title {
-          font-size: 0.76rem;
-          font-weight: 700;
-          color: var(--text-primary);
-          margin-bottom: 0.4rem;
-          display: block;
-        }
-
-        .takeaways-list {
-          list-style: none;
-          display: flex;
-          flex-direction: column;
-          gap: 0.35rem;
-        }
-
-        .takeaway-item {
-          display: flex;
-          align-items: flex-start;
-          gap: 0.45rem;
-          font-size: 0.78rem;
-          color: var(--text-secondary);
-        }
-
-        .takeaway-check {
-          color: #10b981;
-          flex-shrink: 0;
-          margin-top: 2px;
-        }
-
-        .rev-back-footer {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding-top: 0.75rem;
-          border-top: 1px solid var(--border-subtle);
-        }
-
-        .mastery-buttons-group {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-        }
-
-        .mastery-lbl {
-          font-size: 0.75rem;
-          color: var(--text-muted);
-        }
-
-        .cycle-mastery-btn {
-          background: var(--bg-surface-elevated);
-          border: 1px solid var(--border-card);
-          color: var(--text-primary);
-          padding: 0.3rem 0.65rem;
-          border-radius: 6px;
-          font-size: 0.75rem;
-          cursor: pointer;
-        }
-
-        .cycle-mastery-btn:hover {
-          border-color: var(--accent-primary);
-          color: var(--accent-primary);
-        }
-
-        .delete-rev-card-btn {
-          background: rgba(239, 68, 68, 0.1);
-          border: 1px solid rgba(239, 68, 68, 0.3);
-          color: #ef4444;
-          width: 30px;
-          height: 30px;
-          border-radius: 6px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-        }
-
-        .deck-nav-bar {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 0.5rem 0;
-        }
-
-        .nav-counter-pill {
-          font-size: 0.84rem;
-          color: var(--text-secondary);
-          background: var(--bg-surface-elevated);
-          border: 1px solid var(--border-card);
-          padding: 0.35rem 0.95rem;
-          border-radius: 999px;
-        }
-
-        .nav-arrow-btn {
-          padding: 0.45rem 1rem;
-        }
-
-        .empty-deck-box {
-          padding: 3rem 1.5rem;
-          text-align: center;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 0.75rem;
-        }
-
-        .empty-deck-icon {
-          color: var(--text-muted);
-        }
-      `}</style>
-    </section>
-  );
-};
-
-
-================================================================================
-FILE: src/components/ScratchpadCard.tsx
-================================================================================
-'use client';
-
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useDrishti } from '@/context/DrishtiContext';
-import { Terminal, Copy, Check, Trash2, Save, CloudOff, Cloud } from 'lucide-react';
-
-export const ScratchpadCard: React.FC = () => {
-  const {
-    scratchpadContent,
-    setScratchpadContent,
-    flushScratchpadToCloud,
-    scratchpadLanguage,
-    setScratchpadLanguage,
-    isCloudConnected,
-  } = useDrishti();
-
-  const [copied, setCopied] = useState(false);
-  // Local text drives the UI instantly — no waiting for cloud round-trip
-  const [localText, setLocalText] = useState(scratchpadContent);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [isSyncing, setIsSyncing] = useState(false);
-
-  // Sync local text if cloud content changes (e.g. another device edited it)
-  useEffect(() => {
-    setLocalText(scratchpadContent);
-  }, [scratchpadContent]);
-
-  const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
-    setLocalText(val);
-    setScratchpadContent(val); // update local state immediately (for localStorage)
-
-    // Debounce cloud write: only flush after 800ms of idle
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    setIsSyncing(true);
-    debounceRef.current = setTimeout(() => {
-      flushScratchpadToCloud(val);
-      setIsSyncing(false);
-    }, 800);
-  }, [setScratchpadContent, flushScratchpadToCloud]);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(localText);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleClear = () => {
-    if (confirm('Clear scratchpad content?')) {
-      setLocalText('');
-      flushScratchpadToCloud('');
-    }
-  };
-
-  return (
-    <div className="bento-card scratchpad-container">
-      {/* Header */}
-      <div className="scratchpad-header">
-        <div className="title-group">
-          <div className="icon-box">
-            <Terminal size={17} />
-          </div>
-          <div>
-            <h3 className="card-title">Code & Logic Scratchpad</h3>
-            <p className="card-sub">Instant zero-latency note & snippet buffer</p>
-          </div>
-        </div>
-
-        <div className="actions-group">
-          <select
-            value={scratchpadLanguage}
-            onChange={(e) => setScratchpadLanguage(e.target.value)}
-            className="lang-select"
-          >
-            <option value="python">Python</option>
-            <option value="typescript">TypeScript</option>
-            <option value="sql">SQL</option>
-            <option value="markdown">Markdown</option>
-            <option value="json">JSON</option>
-          </select>
-
-          <button onClick={handleCopy} className="btn-icon" title="Copy to Clipboard">
-            {copied ? <Check size={14} color="#10b981" /> : <Copy size={14} />}
-          </button>
-
-          <button onClick={handleClear} className="btn-icon" title="Clear Scratchpad">
-            <Trash2 size={14} />
-          </button>
-        </div>
-      </div>
-
-      {/* Editor Area */}
-      <div className="editor-wrap">
-        <textarea
-          value={localText}
-          onChange={handleChange}
-          placeholder="// Paste temporary algorithms, notes, or logic here..."
-          className="code-textarea"
-          spellCheck={false}
-        />
-      </div>
-
-      {/* Footer */}
-      <div className="scratchpad-footer">
-        <div className="status-saved">
-          {isSyncing ? (
-            <><Cloud size={12} className="save-icon" /><span>Syncing…</span></>
-          ) : isCloudConnected ? (
-            <><Cloud size={12} className="save-icon" /><span>Saved to cloud</span></>
-          ) : (
-            <><CloudOff size={12} className="save-icon" style={{ color: 'var(--text-muted)' }} /><span style={{ color: 'var(--text-muted)' }}>Local only</span></>
-          )}
-        </div>
-        <span className="char-count">
-          {localText.length} chars • {localText.split('\n').length} lines
-        </span>
-      </div>
-
-      <style jsx>{`
-        .scratchpad-container {
-          padding: 1.25rem;
-          display: flex;
-          flex-direction: column;
-          gap: 0.85rem;
-          height: 100%;
-        }
-
-        .scratchpad-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-        }
-
-        .title-group {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-        }
-
-        .icon-box {
-          width: 36px;
-          height: 36px;
-          border-radius: 10px;
-          background: rgba(16, 185, 129, 0.15);
-          color: #10b981;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .card-title {
-          font-size: 1.05rem;
-          font-weight: 700;
-          color: var(--text-primary);
-        }
-
-        .card-sub {
-          font-size: 0.74rem;
-          color: var(--text-muted);
-        }
-
-        .actions-group {
-          display: flex;
-          align-items: center;
-          gap: 0.45rem;
-        }
-
-        .lang-select {
-          background: var(--bg-surface-elevated);
-          border: 1px solid var(--border-card);
-          color: var(--text-primary);
-          padding: 0.25rem 0.6rem;
-          border-radius: 7px;
-          font-size: 0.75rem;
-          font-family: var(--font-mono);
-          outline: none;
-        }
-
-        .editor-wrap {
-          flex: 1;
-          background: #090d13;
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          border-radius: 10px;
-          padding: 0.6rem;
-          display: flex;
-          min-height: 220px;
-        }
-
-        .code-textarea {
-          width: 100%;
-          height: 100%;
-          background: transparent;
-          border: none;
-          outline: none;
-          color: #e2e8f0;
-          font-family: var(--font-mono);
-          font-size: 0.84rem;
-          line-height: 1.5;
-          resize: none;
-        }
-
-        .scratchpad-footer {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          font-size: 0.72rem;
-          color: var(--text-muted);
-          padding-top: 0.35rem;
-        }
-
-        .status-saved {
-          display: flex;
-          align-items: center;
-          gap: 0.35rem;
-          color: #10b981;
-        }
-
-        .char-count {
-          font-family: var(--font-mono);
         }
       `}</style>
     </div>
@@ -8379,307 +7903,193 @@ export const ToolsTileDeck: React.FC = () => {
 
 
 ================================================================================
-FILE: src/components/WisdomFocusCard.tsx
+FILE: src/hooks/useSpeechToText.ts
 ================================================================================
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Sparkles, Headphones, BookOpen, ExternalLink, Play, Pause, RotateCcw } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
-export const WisdomFocusCard: React.FC = () => {
-  const [timerSeconds, setTimerSeconds] = useState(25 * 60);
-  const [isRunning, setIsRunning] = useState(false);
+// Web Speech API interface declarations for TypeScript
+interface SpeechRecognitionEvent extends Event {
+  results: SpeechRecognitionResultList;
+  resultIndex: number;
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string;
+  message?: string;
+}
+
+interface SpeechRecognitionInstance extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onstart: ((this: SpeechRecognitionInstance, ev: Event) => void) | null;
+  onresult: ((this: SpeechRecognitionInstance, ev: SpeechRecognitionEvent) => void) | null;
+  onerror: ((this: SpeechRecognitionInstance, ev: SpeechRecognitionErrorEvent) => void) | null;
+  onend: ((this: SpeechRecognitionInstance, ev: Event) => void) | null;
+}
+
+declare global {
+  interface Window {
+    SpeechRecognition?: new () => SpeechRecognitionInstance;
+    webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
+  }
+}
+
+export interface UseSpeechToTextOptions {
+  lang?: string;
+  onFinalTranscript?: (text: string) => void;
+}
+
+export function useSpeechToText(options: UseSpeechToTextOptions = {}) {
+  const { lang = 'en-US', onFinalTranscript } = options;
+
+  const [isListening, setIsListening] = useState(false);
+  const [transcript, setTranscript] = useState('');
+  const [interimTranscript, setInterimTranscript] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [isSupported, setIsSupported] = useState(true);
+
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const finalTranscriptRef = useRef('');
+  const onFinalCallbackRef = useRef(onFinalTranscript);
+  onFinalCallbackRef.current = onFinalTranscript;
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isRunning && timerSeconds > 0) {
-      interval = setInterval(() => {
-        setTimerSeconds((prev) => prev - 1);
-      }, 1000);
-    } else if (timerSeconds === 0) {
-      setIsRunning(false);
+    if (typeof window === 'undefined') return;
+
+    const SpeechRecognitionClass =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognitionClass) {
+      setIsSupported(false);
+      return;
     }
-    return () => clearInterval(interval);
-  }, [isRunning, timerSeconds]);
 
-  const formatTime = (secs: number) => {
-    const mins = Math.floor(secs / 60);
-    const remaining = secs % 60;
-    return `${mins.toString().padStart(2, '0')}:${remaining.toString().padStart(2, '0')}`;
-  };
+    setIsSupported(true);
 
-  return (
-    <div className="bento-card wisdom-container">
-      {/* Header */}
-      <div className="wisdom-header">
-        <div className="title-group">
-          <div className="icon-box">
-            <Sparkles size={17} />
-          </div>
-          <div>
-            <h3 className="card-title">Wisdom & Focus Sanctuary</h3>
-            <p className="card-sub">Vedantic reflections & deep-work focus timer</p>
-          </div>
-        </div>
-      </div>
+    try {
+      const recognition = new SpeechRecognitionClass();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = lang;
+      recognition.maxAlternatives = 1;
 
-      {/* Featured Sanskrit / Vedabase Reflection */}
-      <div className="verse-card">
-        <span className="verse-citation">Bhagavad Gita 2.47 • Karma Yoga</span>
-        <p className="sanskrit-text">
-          कर्मण्येवाधिकारस्ते मा फलेषु कदाचन |<br />
-          मा कर्मफलहेतुर्भूर्मा ते सङ्गोऽस्त्वकर्मणि ||
-        </p>
-        <p className="verse-trans">
-          &ldquo;You have a right to perform your prescribed duty, but you are not entitled to the fruits of action. Never consider yourself the cause of the results, and never be attached to not doing your duty.&rdquo;
-        </p>
-      </div>
+      recognition.onstart = () => {
+        setIsListening(true);
+        setError(null);
+      };
 
-      {/* Deep Audio Hub Quick Links */}
-      <div className="audio-links-grid">
-        <a
-          href="https://vedabase.io/en/"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="audio-link-btn"
-        >
-          <BookOpen size={14} className="link-icon gold-icon" />
-          <div className="link-texts">
-            <span className="link-name">Vedabase.io</span>
-            <span className="link-hint">Original Texts & Purports</span>
-          </div>
-          <ExternalLink size={12} className="ext-icon" />
-        </a>
+      recognition.onresult = (event: SpeechRecognitionEvent) => {
+        let currentInterim = '';
+        let currentFinal = '';
 
-        <a
-          href="https://audio.iskcondesiretree.com/"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="audio-link-btn"
-        >
-          <Headphones size={14} className="link-icon amber-icon" />
-          <div className="link-texts">
-            <span className="link-name">Desire Tree Audio</span>
-            <span className="link-hint">Lectures & Kirtans</span>
-          </div>
-          <ExternalLink size={12} className="ext-icon" />
-        </a>
-      </div>
-
-      {/* Mini Focus Sprint Timer */}
-      <div className="pomodoro-bar">
-        <div className="timer-display-group">
-          <span className="timer-label">Focus Sprint:</span>
-          <span className="timer-clock">{formatTime(timerSeconds)}</span>
-        </div>
-
-        <div className="timer-controls">
-          <button
-            onClick={() => setIsRunning(!isRunning)}
-            className={`btn-primary timer-btn ${isRunning ? 'running' : ''}`}
-          >
-            {isRunning ? <Pause size={13} /> : <Play size={13} />}
-            <span>{isRunning ? 'Pause' : 'Start'}</span>
-          </button>
-          <button
-            onClick={() => {
-              setIsRunning(false);
-              setTimerSeconds(25 * 60);
-            }}
-            className="btn-icon timer-reset"
-            title="Reset to 25 mins"
-          >
-            <RotateCcw size={13} />
-          </button>
-        </div>
-      </div>
-
-      <style jsx>{`
-        .wisdom-container {
-          padding: 1.25rem;
-          display: flex;
-          flex-direction: column;
-          gap: 0.85rem;
-          height: 100%;
-        }
-
-        .wisdom-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-        }
-
-        .title-group {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-        }
-
-        .icon-box {
-          width: 36px;
-          height: 36px;
-          border-radius: 10px;
-          background: rgba(245, 158, 11, 0.15);
-          color: #f59e0b;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .card-title {
-          font-size: 1.05rem;
-          font-weight: 700;
-          color: var(--text-primary);
-        }
-
-        .card-sub {
-          font-size: 0.74rem;
-          color: var(--text-muted);
-        }
-
-        .verse-card {
-          background: var(--bg-surface-elevated);
-          border: 1px solid var(--border-card);
-          border-left: 3px solid #f59e0b;
-          padding: 0.85rem;
-          border-radius: 0 10px 10px 0;
-          display: flex;
-          flex-direction: column;
-          gap: 0.4rem;
-        }
-
-        .verse-citation {
-          font-size: 0.68rem;
-          font-family: var(--font-mono);
-          color: #fbbf24;
-          font-weight: 700;
-        }
-
-        .sanskrit-text {
-          font-size: 0.88rem;
-          color: var(--text-primary);
-          line-height: 1.4;
-          font-weight: 600;
-        }
-
-        .verse-trans {
-          font-size: 0.78rem;
-          color: var(--text-secondary);
-          line-height: 1.45;
-          font-style: italic;
-        }
-
-        .audio-links-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 0.6rem;
-        }
-
-        .audio-link-btn {
-          background: var(--bg-surface-elevated);
-          border: 1px solid var(--border-card);
-          padding: 0.65rem 0.75rem;
-          border-radius: 10px;
-          display: flex;
-          align-items: center;
-          gap: 0.6rem;
-          text-decoration: none;
-          transition: var(--transition-smooth);
-        }
-
-        .audio-link-btn:hover {
-          border-color: #f59e0b;
-          background: var(--bg-glass-card-hover);
-          transform: translateY(-2px);
-        }
-
-        .gold-icon {
-          color: #fbbf24;
-        }
-
-        .amber-icon {
-          color: #f59e0b;
-        }
-
-        .link-texts {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-        }
-
-        .link-name {
-          font-size: 0.82rem;
-          font-weight: 700;
-          color: var(--text-primary);
-        }
-
-        .link-hint {
-          font-size: 0.68rem;
-          color: var(--text-muted);
-        }
-
-        .ext-icon {
-          color: var(--text-muted);
-        }
-
-        .pomodoro-bar {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          background: var(--bg-surface-elevated);
-          border: 1px solid var(--border-card);
-          padding: 0.6rem 0.85rem;
-          border-radius: 10px;
-          margin-top: auto;
-        }
-
-        .timer-display-group {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-        }
-
-        .timer-label {
-          font-size: 0.75rem;
-          color: var(--text-muted);
-        }
-
-        .timer-clock {
-          font-size: 1.15rem;
-          font-weight: 800;
-          font-family: var(--font-mono);
-          color: var(--accent-primary);
-        }
-
-        .timer-controls {
-          display: flex;
-          align-items: center;
-          gap: 0.4rem;
-        }
-
-        .timer-btn {
-          padding: 0.35rem 0.75rem;
-          font-size: 0.76rem;
-        }
-
-        .running {
-          background: linear-gradient(135deg, #f59e0b, #d97706);
-        }
-
-        .timer-reset {
-          width: 30px;
-          height: 30px;
-        }
-
-        @media (max-width: 600px) {
-          .audio-links-grid {
-            grid-template-columns: 1fr;
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const result = event.results[i];
+          const text = result[0].transcript;
+          if (result.isFinal) {
+            currentFinal += text + ' ';
+          } else {
+            currentInterim += text;
           }
         }
-      `}</style>
-    </div>
-  );
-};
+
+        if (currentFinal) {
+          finalTranscriptRef.current += (finalTranscriptRef.current ? ' ' : '') + currentFinal.trim();
+          setTranscript(finalTranscriptRef.current);
+        }
+        setInterimTranscript(currentInterim);
+      };
+
+      recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+        console.warn('[SpeechRecognition Error]', event.error);
+        if (event.error === 'no-speech') {
+          // ignore transient no-speech
+          return;
+        }
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          setError('Microphone permission denied. Please allow microphone access in your browser settings.');
+        } else {
+          setError(`Audio recognition error: ${event.error}`);
+        }
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+        setInterimTranscript('');
+      };
+
+      recognitionRef.current = recognition;
+    } catch (e) {
+      console.warn('SpeechRecognition initialization error', e);
+      setIsSupported(false);
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch (e) {}
+      }
+    };
+  }, [lang]);
+
+  const startListening = useCallback(() => {
+    if (!recognitionRef.current) {
+      setError('Speech recognition is not supported in this browser.');
+      return;
+    }
+    setError(null);
+    finalTranscriptRef.current = '';
+    setTranscript('');
+    setInterimTranscript('');
+
+    try {
+      recognitionRef.current.start();
+      setIsListening(true);
+    } catch (e) {
+      console.warn('Start listening exception', e);
+    }
+  }, []);
+
+  const stopListening = useCallback(() => {
+    if (!recognitionRef.current) return;
+    try {
+      recognitionRef.current.stop();
+    } catch (e) {}
+    setIsListening(false);
+
+    // If there is any recognized final transcript, trigger callback
+    const totalRecorded = finalTranscriptRef.current.trim();
+    if (totalRecorded && onFinalCallbackRef.current) {
+      onFinalCallbackRef.current(totalRecorded);
+    }
+  }, []);
+
+  const resetTranscript = useCallback(() => {
+    finalTranscriptRef.current = '';
+    setTranscript('');
+    setInterimTranscript('');
+  }, []);
+
+  return {
+    isListening,
+    transcript,
+    interimTranscript,
+    fullLiveTranscript: transcript + (interimTranscript ? ` ${interimTranscript}` : ''),
+    error,
+    isSupported,
+    startListening,
+    stopListening,
+    resetTranscript,
+  };
+}
 
 
 ================================================================================
@@ -8738,6 +8148,7 @@ import {
   DrishtiSettings,
   CourseTreeNode,
   ActivityLogItem,
+  DailyVoiceEntry,
 } from '@/types';
 
 export const MASTER_TILES: MasterTileInfo[] = [
@@ -8747,7 +8158,6 @@ export const MASTER_TILES: MasterTileInfo[] = [
     subtitle: 'ML, Deep Learning, Computer Vision, LLMs, Math & RAG',
     iconName: 'Cpu',
     colorAccent: '#a855f7',
-    subTracks: ['Large Language Models (LLM)', 'Deep Learning (DL)', 'Machine Learning (ML)', 'Computer Vision (CV)', 'RAG & AI Agents', 'Math for AI'],
   },
   {
     id: 'coding-dsa',
@@ -8755,7 +8165,6 @@ export const MASTER_TILES: MasterTileInfo[] = [
     subtitle: 'Data structures, graph algorithms, dynamic programming & problem solving',
     iconName: 'Code2',
     colorAccent: '#38bdf8',
-    subTracks: ['Dynamic Programming (DP)', 'Graphs & BFS/DFS', 'Trees & Binary Search Trees', 'Arrays & Two Pointers', 'Linked Lists & Stacks', 'Heaps & Tries'],
   },
   {
     id: 'system-design',
@@ -8763,7 +8172,6 @@ export const MASTER_TILES: MasterTileInfo[] = [
     subtitle: 'LLD, HLD, distributed architectures & production case studies',
     iconName: 'Server',
     colorAccent: '#60a5fa',
-    subTracks: ['High Level Design (HLD)', 'Low Level Design (LLD / OOD)', 'Distributed Systems & Caching', 'Architecture Case Studies (Uber, WhatsApp)'],
   },
   {
     id: 'market-updates',
@@ -8771,7 +8179,6 @@ export const MASTER_TILES: MasterTileInfo[] = [
     subtitle: 'Real-time AI research papers, engineering blogs & tech pulses',
     iconName: 'TrendingUp',
     colorAccent: '#f97316',
-    subTracks: ['ArXiv AI Papers', 'Engineering Blogs (OpenAI, Anthropic, Google)', 'Hacker News Top Tech', 'Market Trends'],
   },
   {
     id: 'open-source',
@@ -8779,7 +8186,6 @@ export const MASTER_TILES: MasterTileInfo[] = [
     subtitle: 'GitHub projects, PR tracking, framework architecture & contributions',
     iconName: 'GitBranch',
     colorAccent: '#34d399',
-    subTracks: ['Trending AI Repos', 'My PRs & Contributions', 'Framework Source Code Deep Dives', 'Good First Issues'],
   },
   {
     id: 'life-sutras',
@@ -8787,7 +8193,6 @@ export const MASTER_TILES: MasterTileInfo[] = [
     subtitle: 'Bhagavad Gita reflections, timeless principles & daily life notes',
     iconName: 'Sparkles',
     colorAccent: '#fbbf24',
-    subTracks: ['Vedic Sutras & Bhagavad Gita', 'Daily Core Principles', 'Mindset & Focus Quotes', 'Personal Mantras'],
   },
   {
     id: 'health',
@@ -8795,7 +8200,6 @@ export const MASTER_TILES: MasterTileInfo[] = [
     subtitle: 'Workout protocols, nutrition, sleep optimization & mental clarity',
     iconName: 'HeartPulse',
     colorAccent: '#f43f5e',
-    subTracks: ['Strength & Workout Protocols', 'Sleep & Circadian Rhythm', 'Nutrition & Supplements', 'Daily Energy Log'],
   },
   {
     id: 'finance',
@@ -8803,7 +8207,6 @@ export const MASTER_TILES: MasterTileInfo[] = [
     subtitle: 'Investments, expense tracking, market watchlist & financial plans',
     iconName: 'BadgeDollarSign',
     colorAccent: '#10b981',
-    subTracks: ['Investment Portfolio', 'Monthly Expense Ledger', 'Market Watchlist', 'Long-Term Financial Goals'],
   },
   {
     id: 'apply-job',
@@ -8811,7 +8214,6 @@ export const MASTER_TILES: MasterTileInfo[] = [
     subtitle: 'Job application pipeline, resume versions & interview preparation',
     iconName: 'Briefcase',
     colorAccent: '#818cf8',
-    subTracks: ['Target Companies Pipeline', 'Resume & Cover Letter Versions', 'Interview Q&A Log', 'Referrals & Outreach'],
   },
   {
     id: 'tools',
@@ -8819,7 +8221,6 @@ export const MASTER_TILES: MasterTileInfo[] = [
     subtitle: 'Distraction-free deep links to AI tools, docs, social & audio',
     iconName: 'Compass',
     colorAccent: '#38bdf8',
-    subTracks: ['AI Powerhouse', 'Productivity & Docs', 'Social & Comms', 'Media & Audio'],
   },
 ];
 
@@ -9330,5 +8731,8 @@ export const INITIAL_SETTINGS: DrishtiSettings = {
   enableAnimations: true,
   dailyGoalFocusMinutes: 120,
 };
+
+export const INITIAL_DAILY_VOICE_NOTES: DailyVoiceEntry[] = [];
+
 
 

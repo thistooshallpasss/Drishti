@@ -15,18 +15,13 @@ import {
   Briefcase,
   Compass,
   ArrowRight,
-  FileText,
-  BookOpen,
 } from 'lucide-react';
 
 export const DashboardMasterGrid: React.FC = () => {
   const {
     masterTiles,
     setActiveTileId,
-    treeNodes,
     links,
-    revisionCards,
-    getSubTracksForTile,
   } = useDrishti();
 
   const getTileIcon = (id: MasterTileId) => {
@@ -56,11 +51,10 @@ export const DashboardMasterGrid: React.FC = () => {
 
   const getStats = (id: MasterTileId) => {
     if (id === 'tools') {
-      return `${links.length} Deep Links`;
+      return `${links.length} Tools & Launchers`;
     }
-    const notesCount = treeNodes.filter((n) => n.masterTileId === id).length;
-    const revCount = revisionCards.filter((r) => r.masterTileId === id).length;
-    return `${notesCount} Docs • ${revCount} Flashcards`;
+    const count = links.filter((l) => l.masterTileId === id || (id === 'ai' && l.category === 'ai') || (id === 'life-sutras' && l.category === 'spiritual')).length;
+    return `${count} Notes & Links`;
   };
 
   return (
@@ -69,7 +63,7 @@ export const DashboardMasterGrid: React.FC = () => {
         <div>
           <h2 className="section-main-title">Focus & Learning Hubs</h2>
           <p className="section-main-subtitle">
-            Select any hub to explore its multi-level tree notes, Google Docs, flashcards, and tools
+            Direct access to dedicated Google Docs, notes, repositories, and curated resources
           </p>
         </div>
       </div>
@@ -101,30 +95,11 @@ export const DashboardMasterGrid: React.FC = () => {
             <div className="hub-content">
               <h3 className="hub-title">{tile.title}</h3>
               <p className="hub-subtitle">{tile.subtitle}</p>
-
-              {/* Subtracks Preview Pills */}
-              {(() => {
-                const tracks = getSubTracksForTile(tile.id);
-                return (
-                  <div className="subtracks-pill-row">
-                    {tracks.slice(0, 3).map((track, idx) => (
-                      <span key={idx} className="track-mini-pill">
-                        {track}
-                      </span>
-                    ))}
-                    {tracks.length > 3 && (
-                      <span className="track-mini-pill more-pill">
-                        +{tracks.length - 3} more
-                      </span>
-                    )}
-                  </div>
-                );
-              })()}
             </div>
 
             <div className="hub-footer">
               <span className="explore-cta">
-                <span>Open Hub & Tree</span>
+                <span>Open Hub</span>
                 <ArrowRight size={14} />
               </span>
             </div>
@@ -160,7 +135,7 @@ export const DashboardMasterGrid: React.FC = () => {
 
         .master-tiles-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+          grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
           gap: 1.25rem;
         }
 
@@ -169,7 +144,7 @@ export const DashboardMasterGrid: React.FC = () => {
           display: flex;
           flex-direction: column;
           justify-content: space-between;
-          height: 230px;
+          height: 190px;
           cursor: pointer;
           border: 1px solid var(--border-card);
           transition: var(--transition-bounce);
@@ -209,7 +184,7 @@ export const DashboardMasterGrid: React.FC = () => {
         }
 
         .hub-content {
-          margin: 0.6rem 0;
+          margin: 0.4rem 0;
         }
 
         .hub-title {
@@ -228,28 +203,6 @@ export const DashboardMasterGrid: React.FC = () => {
           -webkit-line-clamp: 2;
           -webkit-box-orient: vertical;
           overflow: hidden;
-        }
-
-        .subtracks-pill-row {
-          display: flex;
-          gap: 0.35rem;
-          flex-wrap: wrap;
-          margin-top: 0.55rem;
-        }
-
-        .track-mini-pill {
-          font-size: 0.68rem;
-          color: var(--text-muted);
-          background: var(--bg-surface);
-          border: 1px solid var(--border-subtle);
-          padding: 0.12rem 0.45rem;
-          border-radius: 5px;
-          white-space: nowrap;
-        }
-
-        .more-pill {
-          color: var(--accent-primary);
-          font-weight: 600;
         }
 
         .hub-footer {
