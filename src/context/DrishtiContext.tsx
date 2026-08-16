@@ -292,6 +292,20 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (dbSettings.scratchpad_content) setScratchpadContentState(dbSettings.scratchpad_content);
         if (dbSettings.theme) setSettings((prev) => ({ ...prev, theme: dbSettings.theme as ThemeMode, uiScale: dbSettings.ui_scale || 100 }));
         if (dbSettings.custom_subtracks) setCustomSubTracks(dbSettings.custom_subtracks);
+        if (dbSettings.daily_voice_notes) {
+          try {
+            const notes = Array.isArray(dbSettings.daily_voice_notes)
+              ? dbSettings.daily_voice_notes
+              : typeof dbSettings.daily_voice_notes === 'string'
+              ? JSON.parse(dbSettings.daily_voice_notes)
+              : [];
+            if (notes.length > 0) {
+              setDailyVoiceNotes(filter14DayVoiceNotes(notes));
+            }
+          } catch (e) {
+            console.warn('[Cloud voice notes parse error]', e);
+          }
+        }
       }
 
       setSyncError(null);
@@ -427,12 +441,23 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
       .on('postgres_changes', { event: '*', schema: 'public', table: 'drishti_settings' }, (payload) => {
         if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
           const row = payload.new;
-          // Issue #7: apply fields selectively — only update what changed
-          // so device A saving scratchpad won't overwrite device B's local theme/scale
+          if (row.daily_voice_notes !== undefined && !isOwnMutation('voice_notes')) {
+            try {
+              const notes = Array.isArray(row.daily_voice_notes)
+                ? row.daily_voice_notes
+                : typeof row.daily_voice_notes === 'string'
+                ? JSON.parse(row.daily_voice_notes)
+                : [];
+              if (notes.length > 0) {
+                setDailyVoiceNotes(filter14DayVoiceNotes(notes));
+              }
+            } catch (e) {
+              console.warn('[Realtime voice notes error]', e);
+            }
+          }
           if (row.scratchpad_content !== undefined && !isOwnMutation('settings-scratchpad')) {
             setScratchpadContentState(row.scratchpad_content);
           }
-          // Only apply theme/scale from cloud if we haven't set them locally in the last 5s
           if (row.theme && !isOwnMutation('settings-theme')) {
             setSettings((prev) => ({ ...prev, theme: row.theme as ThemeMode }));
           }
@@ -861,6 +886,22 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
           localStorage.setItem(STORAGE_KEY_VOICE_NOTES, JSON.stringify(updated));
         } catch (e) {}
 
+        trackMutation('voice_notes');
+        if (supabase && isSupabaseConfigured()) {
+          supabase
+            .from('drishti_settings')
+            .upsert({
+              id: 'master_config',
+              daily_voice_notes: updated,
+              updated_at: now.toISOString(),
+            })
+            .then(({ error }) => {
+              if (error) {
+                console.warn('[Supabase Voice Notes Sync Warning]', error.message);
+              }
+            });
+        }
+
         return updated;
       });
 
@@ -879,6 +920,19 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
       try {
         localStorage.setItem(STORAGE_KEY_VOICE_NOTES, JSON.stringify(updated));
       } catch (e) {}
+
+      trackMutation('voice_notes');
+      if (supabase && isSupabaseConfigured()) {
+        supabase
+          .from('drishti_settings')
+          .upsert({
+            id: 'master_config',
+            daily_voice_notes: updated,
+            updated_at: new Date().toISOString(),
+          })
+          .then();
+      }
+
       return updated;
     });
   }, []);
@@ -889,6 +943,19 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
       try {
         localStorage.setItem(STORAGE_KEY_VOICE_NOTES, JSON.stringify(updated));
       } catch (e) {}
+
+      trackMutation('voice_notes');
+      if (supabase && isSupabaseConfigured()) {
+        supabase
+          .from('drishti_settings')
+          .upsert({
+            id: 'master_config',
+            daily_voice_notes: updated,
+            updated_at: new Date().toISOString(),
+          })
+          .then();
+      }
+
       return updated;
     });
   }, []);

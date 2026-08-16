@@ -1,6 +1,6 @@
 ================================================================================
 DRISHTI (दृष्टि) - COMPLETE CODEBASE SNAPSHOT
-Generated on: 2026-08-16 21:26:14
+Generated on: 2026-08-16 21:36:18
 Total files captured: 28
 ================================================================================
 
@@ -12,6 +12,7 @@ PROJECT FILE TREE:
 ├── next.config.mjs
 ├── package.json
 ├── plan.txt
+├── public
 ├── reset_database.sql
 ├── src
 │   ├── app
@@ -537,18 +538,19 @@ CREATE TABLE IF NOT EXISTS drishti_activity_logs (
 -- Index for fast time querying and cleanup
 CREATE INDEX IF NOT EXISTS idx_activity_timestamp ON drishti_activity_logs (timestamp DESC);
 
--- 5. Master Settings & Scratchpad Table
+-- 5. Master Settings & Daily Voice Notes Table
 CREATE TABLE IF NOT EXISTS drishti_settings (
     id TEXT PRIMARY KEY DEFAULT 'master_config',
     theme TEXT DEFAULT 'obsidian',
     ui_scale INTEGER DEFAULT 100,
     scratchpad_content TEXT DEFAULT '',
+    daily_voice_notes JSONB DEFAULT '[]'::jsonb,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Insert default config row if not exists
-INSERT INTO drishti_settings (id, theme, ui_scale, scratchpad_content)
-VALUES ('master_config', 'obsidian', 100, '# Drishti Scratchpad\n')
+INSERT INTO drishti_settings (id, theme, ui_scale, scratchpad_content, daily_voice_notes)
+VALUES ('master_config', 'obsidian', 100, '', '[]'::jsonb)
 ON CONFLICT (id) DO NOTHING;
 
 -- ====================================================================
@@ -1044,6 +1046,20 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (dbSettings.scratchpad_content) setScratchpadContentState(dbSettings.scratchpad_content);
         if (dbSettings.theme) setSettings((prev) => ({ ...prev, theme: dbSettings.theme as ThemeMode, uiScale: dbSettings.ui_scale || 100 }));
         if (dbSettings.custom_subtracks) setCustomSubTracks(dbSettings.custom_subtracks);
+        if (dbSettings.daily_voice_notes) {
+          try {
+            const notes = Array.isArray(dbSettings.daily_voice_notes)
+              ? dbSettings.daily_voice_notes
+              : typeof dbSettings.daily_voice_notes === 'string'
+              ? JSON.parse(dbSettings.daily_voice_notes)
+              : [];
+            if (notes.length > 0) {
+              setDailyVoiceNotes(filter14DayVoiceNotes(notes));
+            }
+          } catch (e) {
+            console.warn('[Cloud voice notes parse error]', e);
+          }
+        }
       }
 
       setSyncError(null);
@@ -1179,12 +1195,23 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
       .on('postgres_changes', { event: '*', schema: 'public', table: 'drishti_settings' }, (payload) => {
         if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
           const row = payload.new;
-          // Issue #7: apply fields selectively — only update what changed
-          // so device A saving scratchpad won't overwrite device B's local theme/scale
+          if (row.daily_voice_notes !== undefined && !isOwnMutation('voice_notes')) {
+            try {
+              const notes = Array.isArray(row.daily_voice_notes)
+                ? row.daily_voice_notes
+                : typeof row.daily_voice_notes === 'string'
+                ? JSON.parse(row.daily_voice_notes)
+                : [];
+              if (notes.length > 0) {
+                setDailyVoiceNotes(filter14DayVoiceNotes(notes));
+              }
+            } catch (e) {
+              console.warn('[Realtime voice notes error]', e);
+            }
+          }
           if (row.scratchpad_content !== undefined && !isOwnMutation('settings-scratchpad')) {
             setScratchpadContentState(row.scratchpad_content);
           }
-          // Only apply theme/scale from cloud if we haven't set them locally in the last 5s
           if (row.theme && !isOwnMutation('settings-theme')) {
             setSettings((prev) => ({ ...prev, theme: row.theme as ThemeMode }));
           }
@@ -1613,6 +1640,22 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
           localStorage.setItem(STORAGE_KEY_VOICE_NOTES, JSON.stringify(updated));
         } catch (e) {}
 
+        trackMutation('voice_notes');
+        if (supabase && isSupabaseConfigured()) {
+          supabase
+            .from('drishti_settings')
+            .upsert({
+              id: 'master_config',
+              daily_voice_notes: updated,
+              updated_at: now.toISOString(),
+            })
+            .then(({ error }) => {
+              if (error) {
+                console.warn('[Supabase Voice Notes Sync Warning]', error.message);
+              }
+            });
+        }
+
         return updated;
       });
 
@@ -1631,6 +1674,19 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
       try {
         localStorage.setItem(STORAGE_KEY_VOICE_NOTES, JSON.stringify(updated));
       } catch (e) {}
+
+      trackMutation('voice_notes');
+      if (supabase && isSupabaseConfigured()) {
+        supabase
+          .from('drishti_settings')
+          .upsert({
+            id: 'master_config',
+            daily_voice_notes: updated,
+            updated_at: new Date().toISOString(),
+          })
+          .then();
+      }
+
       return updated;
     });
   }, []);
@@ -1641,6 +1697,19 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
       try {
         localStorage.setItem(STORAGE_KEY_VOICE_NOTES, JSON.stringify(updated));
       } catch (e) {}
+
+      trackMutation('voice_notes');
+      if (supabase && isSupabaseConfigured()) {
+        supabase
+          .from('drishti_settings')
+          .upsert({
+            id: 'master_config',
+            daily_voice_notes: updated,
+            updated_at: new Date().toISOString(),
+          })
+          .then();
+      }
+
       return updated;
     });
   }, []);
@@ -1776,9 +1845,16 @@ import '@/styles/globals.css';
 import { DrishtiProvider } from '@/context/DrishtiContext';
 
 export const metadata: Metadata = {
-  title: 'Drishti (दृष्टि) - Distraction-Free Command Center & Flashcards',
+  title: 'Drishti (दृष्टि) - Focus Command Center & Knowledge Hub',
   description:
-    'A personalized, high-aesthetic command center featuring direct-intent deep links, interactive SDE & AI/ML revision flashcards, curated tech radar, and developer scratchpad.',
+    'A personalized, high-aesthetic distraction-free command center featuring direct deep links, daily voice journal, and focus learning hubs.',
+  icons: {
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+    ],
+    shortcut: '/icon.svg',
+    apple: '/icon.svg',
+  },
 };
 
 export const viewport: Viewport = {
@@ -3816,8 +3892,8 @@ export const DailyVoiceNotesCard: React.FC = () => {
   const handleToggleListening = () => {
     if (isListening) {
       // Stopping: will append recorded transcript exactly once
-      const textToAppend = (transcript.trim() + (interimTranscript ? ` ${interimTranscript.trim()}` : '')).trim();
-      stopListening();
+      const stoppedText = stopListening();
+      const textToAppend = (stoppedText || transcript.trim() || interimTranscript.trim()).trim();
       if (textToAppend) {
         appendVoiceNote(textToAppend);
       }
@@ -7301,11 +7377,10 @@ declare global {
 
 export interface UseSpeechToTextOptions {
   lang?: string;
-  onFinalTranscript?: (text: string) => void;
 }
 
 export function useSpeechToText(options: UseSpeechToTextOptions = {}) {
-  const { lang = 'en-US', onFinalTranscript } = options;
+  const { lang = 'en-US' } = options;
 
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
@@ -7315,8 +7390,9 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}) {
 
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const finalTranscriptRef = useRef('');
-  const onFinalCallbackRef = useRef(onFinalTranscript);
-  onFinalCallbackRef.current = onFinalTranscript;
+  const lastInterimRef = useRef('');
+  const isUserActiveListeningRef = useRef(false);
+  const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -7357,30 +7433,59 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}) {
           }
         }
 
-        if (currentFinal) {
-          finalTranscriptRef.current += (finalTranscriptRef.current ? ' ' : '') + currentFinal.trim();
+        if (currentFinal.trim()) {
+          finalTranscriptRef.current = (
+            finalTranscriptRef.current + ' ' + currentFinal.trim()
+          ).trim();
           setTranscript(finalTranscriptRef.current);
+          lastInterimRef.current = '';
+        } else {
+          lastInterimRef.current = currentInterim;
         }
+
         setInterimTranscript(currentInterim);
       };
 
       recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
         console.warn('[SpeechRecognition Error]', event.error);
         if (event.error === 'no-speech') {
-          // ignore transient no-speech
+          // Normal on mobile between sentences - ignore and keep active
           return;
         }
         if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
           setError('Microphone permission denied. Please allow microphone access in your browser settings.');
-        } else {
-          setError(`Audio recognition error: ${event.error}`);
+          isUserActiveListeningRef.current = false;
+          setIsListening(false);
         }
-        setIsListening(false);
       };
 
       recognition.onend = () => {
-        setIsListening(false);
+        // If mobile browser auto-ended while user is still actively recording, restart seamlessly!
+        if (lastInterimRef.current.trim()) {
+          finalTranscriptRef.current = (
+            finalTranscriptRef.current + ' ' + lastInterimRef.current.trim()
+          ).trim();
+          setTranscript(finalTranscriptRef.current);
+          lastInterimRef.current = '';
+        }
         setInterimTranscript('');
+
+        if (isUserActiveListeningRef.current) {
+          // Mobile auto-restart
+          if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+          restartTimeoutRef.current = setTimeout(() => {
+            if (isUserActiveListeningRef.current && recognitionRef.current) {
+              try {
+                recognitionRef.current.start();
+                setIsListening(true);
+              } catch (e) {
+                // Already started or restarting
+              }
+            }
+          }, 80);
+        } else {
+          setIsListening(false);
+        }
       };
 
       recognitionRef.current = recognition;
@@ -7390,6 +7495,8 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}) {
     }
 
     return () => {
+      isUserActiveListeningRef.current = false;
+      if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
       if (recognitionRef.current) {
         try {
           recognitionRef.current.abort();
@@ -7405,8 +7512,10 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}) {
     }
     setError(null);
     finalTranscriptRef.current = '';
+    lastInterimRef.current = '';
     setTranscript('');
     setInterimTranscript('');
+    isUserActiveListeningRef.current = true;
 
     try {
       recognitionRef.current.start();
@@ -7417,15 +7526,31 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}) {
   }, []);
 
   const stopListening = useCallback(() => {
-    if (!recognitionRef.current) return;
-    try {
-      recognitionRef.current.stop();
-    } catch (e) {}
+    isUserActiveListeningRef.current = false;
+    if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+
+    if (lastInterimRef.current.trim()) {
+      finalTranscriptRef.current = (
+        finalTranscriptRef.current + ' ' + lastInterimRef.current.trim()
+      ).trim();
+      setTranscript(finalTranscriptRef.current);
+      lastInterimRef.current = '';
+    }
+
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {}
+    }
     setIsListening(false);
+    setInterimTranscript('');
+
+    return finalTranscriptRef.current.trim();
   }, []);
 
   const resetTranscript = useCallback(() => {
     finalTranscriptRef.current = '';
+    lastInterimRef.current = '';
     setTranscript('');
     setInterimTranscript('');
   }, []);
@@ -7434,7 +7559,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}) {
     isListening,
     transcript,
     interimTranscript,
-    fullLiveTranscript: transcript + (interimTranscript ? ` ${interimTranscript}` : ''),
+    fullLiveTranscript: (transcript + (interimTranscript ? ` ${interimTranscript}` : '')).trim(),
     error,
     isSupported,
     startListening,

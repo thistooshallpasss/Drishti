@@ -70,8 +70,8 @@ export const DailyVoiceNotesCard: React.FC = () => {
   const handleToggleListening = () => {
     if (isListening) {
       // Stopping: will append recorded transcript exactly once
-      const textToAppend = (transcript.trim() + (interimTranscript ? ` ${interimTranscript.trim()}` : '')).trim();
-      stopListening();
+      const stoppedText = stopListening();
+      const textToAppend = (stoppedText || transcript.trim() || interimTranscript.trim()).trim();
       if (textToAppend) {
         appendVoiceNote(textToAppend);
       }

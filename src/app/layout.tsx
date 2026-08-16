@@ -3,9 +3,16 @@ import '@/styles/globals.css';
 import { DrishtiProvider } from '@/context/DrishtiContext';
 
 export const metadata: Metadata = {
-  title: 'Drishti (दृष्टि) - Distraction-Free Command Center & Flashcards',
+  title: 'Drishti (दृष्टि) - Focus Command Center & Knowledge Hub',
   description:
-    'A personalized, high-aesthetic command center featuring direct-intent deep links, interactive SDE & AI/ML revision flashcards, curated tech radar, and developer scratchpad.',
+    'A personalized, high-aesthetic distraction-free command center featuring direct deep links, daily voice journal, and focus learning hubs.',
+  icons: {
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+    ],
+    shortcut: '/icon.svg',
+    apple: '/icon.svg',
+  },
 };
 
 export const viewport: Viewport = {

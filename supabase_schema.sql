@@ -69,18 +69,19 @@ CREATE TABLE IF NOT EXISTS drishti_activity_logs (
 -- Index for fast time querying and cleanup
 CREATE INDEX IF NOT EXISTS idx_activity_timestamp ON drishti_activity_logs (timestamp DESC);
 
--- 5. Master Settings & Scratchpad Table
+-- 5. Master Settings & Daily Voice Notes Table
 CREATE TABLE IF NOT EXISTS drishti_settings (
     id TEXT PRIMARY KEY DEFAULT 'master_config',
     theme TEXT DEFAULT 'obsidian',
     ui_scale INTEGER DEFAULT 100,
     scratchpad_content TEXT DEFAULT '',
+    daily_voice_notes JSONB DEFAULT '[]'::jsonb,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Insert default config row if not exists
-INSERT INTO drishti_settings (id, theme, ui_scale, scratchpad_content)
-VALUES ('master_config', 'obsidian', 100, '# Drishti Scratchpad\n')
+INSERT INTO drishti_settings (id, theme, ui_scale, scratchpad_content, daily_voice_notes)
+VALUES ('master_config', 'obsidian', 100, '', '[]'::jsonb)
 ON CONFLICT (id) DO NOTHING;
 
 -- ====================================================================
