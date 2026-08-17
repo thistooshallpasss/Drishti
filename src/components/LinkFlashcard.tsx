@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { DeepLinkItem } from '@/types';
 import { useDrishti } from '@/context/DrishtiContext';
 import {
@@ -11,6 +11,7 @@ import {
   Check,
   X,
   Flame,
+  Tag,
 } from 'lucide-react';
 
 interface LinkFlashcardProps {
@@ -25,7 +26,10 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
   const [editTitle, setEditTitle] = useState(link.title);
   const [editUrl, setEditUrl] = useState(link.url);
   const [editDesc, setEditDesc] = useState(link.description || '');
+  const [editTags, setEditTags] = useState<string[]>(link.tags || []);
+  const [tagInput, setTagInput] = useState('');
   const [faviconError, setFaviconError] = useState(false);
+  const tagInputRef = useRef<HTMLInputElement>(null);
 
   // Extract domain for favicon lookup
   const getDomain = (rawUrl: string) => {
@@ -46,6 +50,18 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
     window.open(link.url, '_blank', 'noopener,noreferrer');
   };
 
+  const addTag = () => {
+    const t = tagInput.trim();
+    if (t && !editTags.includes(t)) setEditTags((prev) => [...prev, t]);
+    setTagInput('');
+    tagInputRef.current?.focus();
+  };
+
+  const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(); }
+    else if (e.key === 'Backspace' && !tagInput && editTags.length > 0) setEditTags((prev) => prev.slice(0, -1));
+  };
+
   const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -60,6 +76,7 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
       title: editTitle.trim(),
       url: cleanUrl,
       description: editDesc.trim(),
+      tags: editTags,
     });
     setIsFlipped(false);
   };
@@ -106,6 +123,8 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
                   setEditTitle(link.title);
                   setEditUrl(link.url);
                   setEditDesc(link.description || '');
+                  setEditTags(link.tags || []);
+                  setTagInput('');
                   setIsFlipped(true);
                 }}
                 className="flip-btn"
@@ -155,6 +174,13 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
           {/* Card Footer */}
           <div className="card-footer-section" onClick={(e) => e.stopPropagation()}>
             <div className="stats-indicator">
+              {link.tags && link.tags.length > 0 && (
+                <div className="front-tags-row">
+                  {link.tags.slice(0, 3).map((tag) => (
+                    <span key={tag} className="front-tag-chip">#{tag}</span>
+                  ))}
+                </div>
+              )}
               {link.clickCount > 0 && (
                 <span className="clicks-badge" title="Total launches">
                   <Flame size={12} className="flame-icon" /> {link.clickCount} launches
@@ -227,6 +253,32 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
               />
             </div>
 
+            <div className="input-group">
+              <label className="input-label">
+                <Tag size={12} style={{ display: 'inline', marginRight: '3px' }} />
+                Tags
+              </label>
+              <div className="edit-tag-input-area">
+                {editTags.map((tag) => (
+                  <span key={tag} className="edit-tag-chip">
+                    {tag}
+                    <button type="button" className="tag-rm-btn" onClick={() => setEditTags((p) => p.filter((t) => t !== tag))}>
+                      <X size={9} />
+                    </button>
+                  </span>
+                ))}
+                <input
+                  ref={tagInputRef}
+                  type="text"
+                  className="edit-tag-text-input"
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={handleTagKeyDown}
+                  placeholder={editTags.length === 0 ? 'Add tag…' : ''}
+                />
+              </div>
+            </div>
+
             <div className="edit-actions-row">
               <button
                 type="button"
@@ -249,7 +301,7 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
       <style jsx>{`
         .link-card-container {
           perspective: 1000px;
-          height: 190px;
+          height: 210px;
           position: relative;
         }
 
@@ -434,6 +486,22 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
           font-size: 0.7rem;
           color: var(--text-muted);
           font-family: var(--font-mono);
+          display: flex;
+          flex-direction: column;
+          gap: 0.3rem;
+        }
+
+        .front-tags-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.25rem;
+        }
+
+        .front-tag-chip {
+          font-size: 0.66rem;
+          color: var(--accent-primary);
+          opacity: 0.8;
+          font-weight: 600;
         }
 
         .clicks-badge {
@@ -441,6 +509,62 @@ export const LinkFlashcard: React.FC<LinkFlashcardProps> = ({ link }) => {
           align-items: center;
           gap: 0.25rem;
           color: #f97316;
+        }
+
+        /* Tag Input in Edit form */
+        .edit-tag-input-area {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 0.3rem;
+          background: var(--bg-input);
+          border: 1px solid var(--border-card);
+          border-radius: 8px;
+          padding: 0.3rem 0.6rem;
+          min-height: 34px;
+          cursor: text;
+        }
+
+        .edit-tag-input-area:focus-within {
+          border-color: var(--accent-primary);
+        }
+
+        .edit-tag-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.2rem;
+          background: rgba(56, 189, 248, 0.12);
+          border: 1px solid rgba(56, 189, 248, 0.3);
+          color: var(--accent-primary);
+          padding: 0.1rem 0.4rem;
+          border-radius: 14px;
+          font-size: 0.68rem;
+          font-weight: 600;
+          white-space: nowrap;
+        }
+
+        .tag-rm-btn {
+          background: transparent;
+          border: none;
+          cursor: pointer;
+          color: var(--accent-primary);
+          display: flex;
+          align-items: center;
+          padding: 0;
+          opacity: 0.7;
+        }
+
+        .tag-rm-btn:hover { opacity: 1; }
+
+        .edit-tag-text-input {
+          flex: 1;
+          min-width: 60px;
+          background: transparent;
+          border: none;
+          outline: none;
+          color: var(--text-primary);
+          font-size: 0.8rem;
+          padding: 0;
         }
 
         .launch-direct-btn {

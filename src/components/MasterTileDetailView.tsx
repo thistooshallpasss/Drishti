@@ -18,7 +18,6 @@ export const MasterTileDetailView: React.FC = () => {
     setActiveTileId,
     links,
     setIsAddLinkModalOpen,
-    setDefaultModalCategory,
   } = useDrishti();
 
   const [tileSearch, setTileSearch] = useState('');
@@ -26,15 +25,9 @@ export const MasterTileDetailView: React.FC = () => {
   const currentTile = masterTiles.find((t) => t.id === activeTileId);
   if (!currentTile) return null;
 
-  // Filter links belonging to this tile
+  // Filter links belonging to this tile — strictly by masterTileId
   const tileLinks = links.filter((l) => {
-    const matchesTile =
-      l.masterTileId === currentTile.id ||
-      (currentTile.id === 'tools') ||
-      (currentTile.id === 'ai' && l.category === 'ai') ||
-      (currentTile.id === 'life-sutras' && l.category === 'spiritual') ||
-      (currentTile.id === 'open-source' && (l.tags?.includes('Open Source') || l.tags?.includes('GitHub'))) ||
-      (currentTile.id === 'apply-job' && (l.category === 'social' || l.tags?.includes('Career')));
+    const matchesTile = l.masterTileId === currentTile.id;
 
     if (!matchesTile) return false;
 
@@ -49,14 +42,6 @@ export const MasterTileDetailView: React.FC = () => {
     return true;
   });
 
-  const getCategoryForTile = (tileId: string) => {
-    switch (tileId) {
-      case 'ai': return 'ai';
-      case 'life-sutras': return 'spiritual';
-      case 'tools': return 'productivity';
-      default: return 'productivity';
-    }
-  };
 
   return (
     <div className="tile-detail-container">
@@ -85,7 +70,6 @@ export const MasterTileDetailView: React.FC = () => {
 
           <button
             onClick={() => {
-              setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
               setIsAddLinkModalOpen(true);
             }}
             className="btn-primary add-doc-btn"
@@ -135,7 +119,6 @@ export const MasterTileDetailView: React.FC = () => {
             <div
               className="add-card-placeholder bento-card"
               onClick={() => {
-                setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
                 setIsAddLinkModalOpen(true);
               }}
               role="button"
@@ -161,7 +144,6 @@ export const MasterTileDetailView: React.FC = () => {
             </p>
             <button
               onClick={() => {
-                setDefaultModalCategory(getCategoryForTile(currentTile.id) as any);
                 setIsAddLinkModalOpen(true);
               }}
               className="btn-primary empty-add-btn"

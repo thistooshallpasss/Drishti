@@ -1,42 +1,83 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useDrishti } from '@/context/DrishtiContext';
-import { LinkCategory } from '@/types';
-import { X, Check, Globe, Sparkles } from 'lucide-react';
+import { MasterTileId } from '@/types';
+import { X, Check, Globe, Plus, Tag, Trash2 } from 'lucide-react';
+
+const HUB_OPTIONS: { id: MasterTileId; label: string }[] = [
+  { id: 'ai', label: 'AI & Machine Learning' },
+  { id: 'coding-dsa', label: 'Coding & DSA' },
+  { id: 'system-design', label: 'System Design' },
+  { id: 'market-updates', label: 'Recent Update in Market' },
+  { id: 'open-source', label: 'Open Source' },
+  { id: 'life-sutras', label: 'Life Sutras & Wisdom' },
+  { id: 'health', label: 'Health & Energy' },
+  { id: 'finance', label: 'Finance & Wealth' },
+  { id: 'apply-job', label: 'Apply Job & Career' },
+  { id: 'tools', label: 'Tools & Deep Links' },
+];
 
 export const AddEditLinkModal: React.FC = () => {
   const {
     isAddLinkModalOpen,
     setIsAddLinkModalOpen,
-    defaultModalCategory,
     editingLink,
     setEditingLink,
     addLink,
     updateLink,
+    activeTileId,
   } = useDrishti();
 
   const [title, setTitle] = useState('');
   const [url, setUrl] = useState('');
-  const [category, setCategory] = useState<LinkCategory>(defaultModalCategory);
+  const [selectedHub, setSelectedHub] = useState<MasterTileId>(activeTileId || 'tools');
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState('');
+  const tagInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (editingLink) {
       setTitle(editingLink.title);
       setUrl(editingLink.url);
-      setCategory(editingLink.category);
+      setSelectedHub((editingLink.masterTileId as MasterTileId) || activeTileId || 'tools');
+      setTags(editingLink.tags || []);
     } else {
       setTitle('');
       setUrl('');
-      setCategory(defaultModalCategory || 'ai');
+      setSelectedHub(activeTileId || 'tools');
+      setTags([]);
     }
-  }, [editingLink, isAddLinkModalOpen, defaultModalCategory]);
+    setTagInput('');
+  }, [editingLink, isAddLinkModalOpen, activeTileId]);
 
   if (!isAddLinkModalOpen) return null;
 
   const handleClose = () => {
     setIsAddLinkModalOpen(false);
     setEditingLink(null);
+  };
+
+  const addTag = () => {
+    const trimmed = tagInput.trim();
+    if (trimmed && !tags.includes(trimmed)) {
+      setTags((prev) => [...prev, trimmed]);
+    }
+    setTagInput('');
+    tagInputRef.current?.focus();
+  };
+
+  const removeTag = (tag: string) => {
+    setTags((prev) => prev.filter((t) => t !== tag));
+  };
+
+  const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addTag();
+    } else if (e.key === 'Backspace' && !tagInput && tags.length > 0) {
+      setTags((prev) => prev.slice(0, -1));
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -47,10 +88,11 @@ export const AddEditLinkModal: React.FC = () => {
       updateLink(editingLink.id, {
         title: title.trim(),
         url: url.trim(),
-        category,
+        masterTileId: selectedHub,
+        tags,
       });
     } else {
-      addLink(title.trim(), url.trim(), category);
+      addLink(title.trim(), url.trim(), 'custom', selectedHub, tags);
     }
 
     handleClose();
@@ -130,19 +172,52 @@ export const AddEditLinkModal: React.FC = () => {
           </div>
 
           <div className="form-group">
-            <label className="input-label">Category</label>
+            <label className="input-label">Add to Hub</label>
             <select
               className="select-input"
-              value={category}
-              onChange={(e) => setCategory(e.target.value as LinkCategory)}
+              value={selectedHub}
+              onChange={(e) => setSelectedHub(e.target.value as MasterTileId)}
             >
-              <option value="ai">AI Powerhouse</option>
-              <option value="productivity">Productivity & Docs</option>
-              <option value="social">Social & Comms</option>
-              <option value="spiritual">Spiritual Wisdom</option>
-              <option value="media">Media & Audio</option>
-              <option value="custom">Custom</option>
+              {HUB_OPTIONS.map((h) => (
+                <option key={h.id} value={h.id}>{h.label}</option>
+              ))}
             </select>
+          </div>
+
+          <div className="form-group">
+            <label className="input-label">
+              <Tag size={13} style={{ display: 'inline', marginRight: '4px' }} />
+              Custom Tags <span className="label-hint">(press Enter or comma to add)</span>
+            </label>
+            <div className="tag-input-area">
+              {tags.map((tag) => (
+                <span key={tag} className="tag-chip">
+                  {tag}
+                  <button
+                    type="button"
+                    className="tag-remove-btn"
+                    onClick={() => removeTag(tag)}
+                    tabIndex={-1}
+                  >
+                    <X size={10} />
+                  </button>
+                </span>
+              ))}
+              <input
+                ref={tagInputRef}
+                type="text"
+                className="tag-text-input"
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                onKeyDown={handleTagKeyDown}
+                placeholder={tags.length === 0 ? 'Add tag…' : ''}
+              />
+            </div>
+            {tagInput.trim() && (
+              <button type="button" onClick={addTag} className="add-tag-btn">
+                <Plus size={12} /> Add &quot;{tagInput.trim()}&quot;
+              </button>
+            )}
           </div>
 
           <div className="modal-footer">
@@ -242,6 +317,15 @@ export const AddEditLinkModal: React.FC = () => {
           font-size: 0.8rem;
           font-weight: 600;
           color: var(--text-secondary);
+          display: flex;
+          align-items: center;
+        }
+
+        .label-hint {
+          font-size: 0.72rem;
+          font-weight: 400;
+          color: var(--text-muted);
+          margin-left: 0.3rem;
         }
 
         .text-input,
@@ -253,12 +337,92 @@ export const AddEditLinkModal: React.FC = () => {
           padding: 0.6rem 0.85rem;
           font-size: 0.88rem;
           outline: none;
+          width: 100%;
         }
 
         .text-input:focus,
         .select-input:focus {
           border-color: var(--accent-primary);
           box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+        }
+
+        /* Tag Input Area */
+        .tag-input-area {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 0.4rem;
+          background: var(--bg-input);
+          border: 1px solid var(--border-card);
+          border-radius: 10px;
+          padding: 0.4rem 0.7rem;
+          min-height: 42px;
+          cursor: text;
+          transition: border-color 0.2s;
+        }
+
+        .tag-input-area:focus-within {
+          border-color: var(--accent-primary);
+          box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+        }
+
+        .tag-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.3rem;
+          background: rgba(56, 189, 248, 0.12);
+          border: 1px solid rgba(56, 189, 248, 0.3);
+          color: var(--accent-primary);
+          padding: 0.18rem 0.55rem;
+          border-radius: 20px;
+          font-size: 0.76rem;
+          font-weight: 600;
+          white-space: nowrap;
+        }
+
+        .tag-remove-btn {
+          background: transparent;
+          border: none;
+          color: var(--accent-primary);
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          padding: 0;
+          opacity: 0.7;
+        }
+
+        .tag-remove-btn:hover {
+          opacity: 1;
+        }
+
+        .tag-text-input {
+          flex: 1;
+          min-width: 80px;
+          background: transparent;
+          border: none;
+          outline: none;
+          color: var(--text-primary);
+          font-size: 0.88rem;
+          padding: 0.1rem 0;
+        }
+
+        .add-tag-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.3rem;
+          background: transparent;
+          border: 1px dashed var(--accent-primary);
+          color: var(--accent-primary);
+          padding: 0.25rem 0.6rem;
+          border-radius: 6px;
+          font-size: 0.76rem;
+          font-weight: 600;
+          cursor: pointer;
+          margin-top: 0.1rem;
+        }
+
+        .add-tag-btn:hover {
+          background: rgba(56, 189, 248, 0.1);
         }
 
         .modal-footer {

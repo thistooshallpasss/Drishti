@@ -46,7 +46,7 @@ interface DrishtiContextType {
   filteredLinks: DeepLinkItem[];
   activeLinkCategory: LinkCategory;
   setActiveLinkCategory: (cat: LinkCategory) => void;
-  addLink: (title: string, url: string, category?: LinkCategory) => void;
+  addLink: (title: string, url: string, category?: LinkCategory, masterTileId?: MasterTileId, customTags?: string[]) => void;
   updateLink: (id: string, updates: Partial<DeepLinkItem>) => void;
   deleteLink: (id: string) => void;
   togglePinLink: (id: string) => void;
@@ -119,12 +119,7 @@ const ECHO_GUARD_TTL_MS = 3000;
 
 export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isCloudConnected, setIsCloudConnected] = useState<boolean>(false);
-  // Issue #18: warn immediately if Supabase env vars are missing (not just on failure)
-  const [syncError, setSyncError] = useState<string | null>(
-    !isSupabaseConfigured()
-      ? 'Cloud sync disabled — NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY not set. Running in local-only mode.'
-      : null
-  );
+  const [syncError, setSyncError] = useState<string | null>(null);
   const recentMutations = useRef<Map<string, number>>(new Map());
 
   const trackMutation = (id: string) => {
@@ -247,6 +242,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setLinks(dbLinks.map((row) => ({
           id: row.id, title: row.title, url: row.url,
           category: row.category as LinkCategory, description: row.description,
+          masterTileId: (row.master_tile_id as MasterTileId) || undefined,
           isPinned: row.is_pinned, orderIndex: row.order_index,
           iconType: row.icon_type, iconValue: row.icon_value,
           tags: row.tags || [], badge: row.badge, accentColor: row.accent_color,
@@ -336,6 +332,10 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const savedVoice = localStorage.getItem(STORAGE_KEY_VOICE_NOTES);
         if (savedVoice) setDailyVoiceNotes(filter14DayVoiceNotes(JSON.parse(savedVoice)));
       } catch (e) { console.warn('Local storage read error', e); }
+      // Check sync status client-side only (avoids SSR hydration mismatch)
+      if (!isSupabaseConfigured()) {
+        setSyncError('Cloud sync disabled — NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY not set. Running in local-only mode.');
+      }
       await fetchFromCloud();
     };
     initData();
@@ -352,7 +352,8 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
           setLinks((prev) => {
             if (prev.some((l) => l.id === row.id)) return prev;
             return [{ id: row.id, title: row.title, url: row.url, category: row.category as LinkCategory,
-              description: row.description, isPinned: row.is_pinned, orderIndex: row.order_index,
+              description: row.description, masterTileId: (row.master_tile_id as MasterTileId) || undefined,
+              isPinned: row.is_pinned, orderIndex: row.order_index,
               iconType: row.icon_type, iconValue: row.icon_value, tags: row.tags || [],
               badge: row.badge, accentColor: row.accent_color, clickCount: row.click_count,
               lastVisited: row.last_visited, createdAt: row.created_at,
@@ -367,7 +368,8 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
             if (row.updated_at && l.createdAt && new Date(row.updated_at) < new Date(l.createdAt)) return l;
             return {
               ...l, title: row.title, url: row.url, category: row.category as LinkCategory,
-              description: row.description, isPinned: row.is_pinned, orderIndex: row.order_index,
+              description: row.description, masterTileId: (row.master_tile_id as MasterTileId) || l.masterTileId,
+              isPinned: row.is_pinned, orderIndex: row.order_index,
               iconType: row.icon_type, iconValue: row.icon_value, tags: row.tags || [],
               badge: row.badge, accentColor: row.accent_color, clickCount: row.click_count,
               lastVisited: row.last_visited,
@@ -558,13 +560,14 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return recents;
   }, [activityLogs]);
 
-  const addLink = (title: string, url: string, category: LinkCategory = 'ai') => {
+  const addLink = (title: string, url: string, category: LinkCategory = 'custom', tileId?: MasterTileId, customTags?: string[]) => {
     let cleanUrl = url.trim();
     if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) cleanUrl = `https://${cleanUrl}`;
     const item: DeepLinkItem = {
       id: `link-${Date.now()}`, title: title.trim(), url: cleanUrl, category,
+      masterTileId: tileId,
       isPinned: false, orderIndex: links.length, iconType: 'favicon', iconValue: cleanUrl,
-      tags: [category.toUpperCase()], clickCount: 0, createdAt: new Date().toISOString().split('T')[0],
+      tags: customTags || [], clickCount: 0, createdAt: new Date().toISOString().split('T')[0],
     };
     trackMutation(item.id);
     setLinks((prev) => [item, ...prev]);
@@ -572,6 +575,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (supabase && isSupabaseConfigured()) {
       supabase.from('drishti_links').upsert({
         id: item.id, title: item.title, url: item.url, category: item.category,
+        master_tile_id: item.masterTileId || null,
         description: item.description || '', is_pinned: item.isPinned, order_index: item.orderIndex,
         tags: item.tags, badge: item.badge || '', click_count: item.clickCount, last_visited: item.lastVisited || '',
       }).then(({ error }) => { if (error) { console.error('[Supabase Link Add Error]', error); setSyncError(`Failed to save link: ${error.message}`); } });
@@ -586,6 +590,7 @@ export const DrishtiProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (target && supabase && isSupabaseConfigured()) {
         supabase.from('drishti_links').upsert({
           id: target.id, title: target.title, url: target.url, category: target.category,
+          master_tile_id: target.masterTileId || null,
           description: target.description || '', is_pinned: target.isPinned, order_index: target.orderIndex,
           tags: target.tags || [], badge: target.badge || '', click_count: target.clickCount,
           last_visited: target.lastVisited || '', updated_at: new Date().toISOString(),
