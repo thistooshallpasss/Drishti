@@ -1,5 +1,5 @@
 -- ====================================================================
--- DRISHTI (दृष्टि) - COMPLETE HARD DATABASE RESET SCRIPT
+-- DRISHTI (दृष्टि) - COMPLETE HARD DATABASE RESET SCRIPT v2
 -- Paste this script into your Supabase SQL Editor and click RUN (▶)
 -- This will wipe all tables, clear old data, and recreate everything fresh.
 -- ====================================================================
@@ -12,12 +12,13 @@ DROP TABLE IF EXISTS drishti_activity_logs CASCADE;
 DROP TABLE IF EXISTS drishti_settings CASCADE;
 DROP FUNCTION IF EXISTS clean_old_drishti_logs CASCADE;
 
--- Step 2: Recreate 1. Deep Links Table (Tools & Apps)
+-- Step 2: Recreate 1. Deep Links Table (with master_tile_id for hub assignment)
 CREATE TABLE drishti_links (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
     url TEXT NOT NULL,
-    category TEXT DEFAULT 'ai',
+    category TEXT DEFAULT 'custom',
+    master_tile_id TEXT DEFAULT NULL,
     description TEXT DEFAULT '',
     is_pinned BOOLEAN DEFAULT FALSE,
     order_index INTEGER DEFAULT 0,
@@ -78,13 +79,17 @@ CREATE TABLE drishti_activity_logs (
     time_str TEXT NOT NULL
 );
 
--- Recreate 5. Settings & Scratchpad
+-- Create index for fast time querying and cleanup
+CREATE INDEX idx_activity_timestamp ON drishti_activity_logs (timestamp DESC);
+
+-- Recreate 5. Settings, Scratchpad & Daily Voice Notes
 CREATE TABLE drishti_settings (
     id TEXT PRIMARY KEY DEFAULT 'master_config',
     theme TEXT DEFAULT 'obsidian',
     ui_scale INTEGER DEFAULT 100,
     scratchpad_content TEXT DEFAULT '',
     custom_subtracks JSONB DEFAULT '{}'::jsonb,
+    daily_voice_notes JSONB DEFAULT '[]'::jsonb,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -101,16 +106,42 @@ CREATE POLICY "Allow public access for drishti_revision_cards" ON drishti_revisi
 CREATE POLICY "Allow public access for drishti_activity_logs" ON drishti_activity_logs FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public access for drishti_settings" ON drishti_settings FOR ALL USING (true) WITH CHECK (true);
 
--- Step 4: Enable Realtime Broadcasting across all tables
-ALTER PUBLICATION supabase_realtime ADD TABLE drishti_links;
-ALTER PUBLICATION supabase_realtime ADD TABLE drishti_tree_nodes;
-ALTER PUBLICATION supabase_realtime ADD TABLE drishti_revision_cards;
-ALTER PUBLICATION supabase_realtime ADD TABLE drishti_activity_logs;
-ALTER PUBLICATION supabase_realtime ADD TABLE drishti_settings;
+-- Step 4: Enable Realtime Broadcasting across all tables (safe, ignores duplicates)
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE drishti_links;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END;
+$$;
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE drishti_tree_nodes;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END;
+$$;
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE drishti_revision_cards;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END;
+$$;
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE drishti_activity_logs;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END;
+$$;
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE drishti_settings;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END;
+$$;
 
--- Step 5: Insert default settings
-INSERT INTO drishti_settings (id, theme, ui_scale, scratchpad_content, custom_subtracks)
-VALUES ('master_config', 'obsidian', 100, '# Drishti Scratchpad\n\n# SDE / AI Problem solving scratch area\n', '{}'::jsonb);
+-- Step 5: Insert default settings row
+INSERT INTO drishti_settings (id, theme, ui_scale, scratchpad_content, custom_subtracks, daily_voice_notes)
+VALUES ('master_config', 'obsidian', 100, '', '{}'::jsonb, '[]'::jsonb)
+ON CONFLICT (id) DO NOTHING;
 
 -- Step 6: 60-Day Rolling Log Cleanup Function
 CREATE OR REPLACE FUNCTION clean_old_drishti_logs()
@@ -120,3 +151,6 @@ BEGIN
     WHERE timestamp < NOW() - INTERVAL '60 days';
 END;
 $$ LANGUAGE plpgsql;
+
+-- Done!
+SELECT 'DRISHTI database reset complete — all tables recreated fresh.' AS status;
